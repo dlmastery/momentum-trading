@@ -301,6 +301,32 @@ export default function Home() {
             <EquityChart curve={r.equityCurve} />
           </div>
 
+          <div className="panel rules-box">
+            <div className="section-title">How a stock turns 🟢 GREEN (enter) or 🔴 RED (exit)</div>
+            <div className="rules2">
+              <div className="rule-card green">
+                <div className="rc-head">🟢 GREEN = ENTER (all 3 required, same day)</div>
+                <ul>
+                  <li><b>{data.params.consecutiveUpDays} consecutive up days</b> — close higher than the prior close, {data.params.consecutiveUpDays} days running</li>
+                  <li><b>{data.params.consecutiveUpWeeks} consecutive up weeks</b> — the last {data.params.consecutiveUpWeeks} weekly closes each higher than the one before</li>
+                  <li><b>Analysts bullish</b> — Yahoo consensus rating is Buy or Strong&nbsp;Buy</li>
+                </ul>
+                <div className="rc-foot">Green stocks are scored on the 3 factors, ranked, and the top fill the 20 × $500 slots.</div>
+              </div>
+              <div className="rule-card red">
+                <div className="rc-head">🔴 RED = EXIT a held stock (either one)</div>
+                <ul>
+                  <li><b>{data.params.consecutiveDownDays} consecutive down days</b> — close lower than the prior close, {data.params.consecutiveDownDays} days in a row</li>
+                  <li><b>Rapid drop ≥ {(data.params.rapidDropPct * 100).toFixed(0)}%</b> — a single day that falls {(data.params.rapidDropPct * 100).toFixed(0)}% or more</li>
+                </ul>
+                <div className="rc-foot">A <i>single</i> down day does <b>not</b> sell — you hold through one red day and only exit on two in a row (or the rapid drop).</div>
+              </div>
+            </div>
+            <div className="muted" style={{ fontSize: 12.5, marginTop: 10 }}>
+              Note: individual heatmap cells are shaded green/red by that <i>one</i> day&rsquo;s % move — a colored cell is just a single day, not a trade. The <b>B</b>/<b>S</b> letters are the actual buys/sells.
+            </div>
+          </div>
+
           <div className="panel">
             <div className="section-title">① Pick a day — click any column in the grid, or use the slider/arrows below</div>
             <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>

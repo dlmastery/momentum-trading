@@ -5,7 +5,7 @@ import { AnalystInfo, isBullish } from "./analyst";
 export const PARAMS = {
   consecutiveUpDays: 4, // "four consecutive days increase"
   consecutiveUpWeeks: 4, // "four consecutive weeks increase"
-  rapidDropPct: 0.07, // single-day drop that forces an exit (7%)
+  rapidDropPct: 0.20, // single-day drop that forces an exit (20%)
   consecutiveDownDays: 2, // "two consecutive downs" forces an exit
   maxPositions: 20, // "pick top 20 stocks to trade"
   budget: 10000, // "$10,000 budget"
