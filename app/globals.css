@@ -527,3 +527,70 @@ table.hm td {
   background: var(--panel);
   color: var(--muted);
 }
+
+/* ---- enter / exit / hold blocks ---- */
+.eeh {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin: 4px 0 22px;
+}
+@media (max-width: 900px) {
+  .eeh {
+    grid-template-columns: 1fr;
+  }
+}
+.eeh-col {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  background: var(--panel-2);
+}
+.eeh-col.enter {
+  border-color: rgba(46, 204, 113, 0.4);
+}
+.eeh-col.exit {
+  border-color: rgba(255, 93, 108, 0.4);
+}
+.eeh-col.hold {
+  border-color: rgba(79, 157, 255, 0.4);
+}
+.eeh-head {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 10px;
+  letter-spacing: 0.01em;
+}
+.eeh-empty {
+  font-size: 13px;
+  color: var(--muted);
+  padding: 8px 2px;
+}
+table.mini {
+  font-size: 12.5px;
+}
+table.mini th,
+table.mini td {
+  padding: 5px 7px;
+}
+
+/* ---- day slider + nav ---- */
+.day-slider {
+  width: 100%;
+  margin: 16px 0 6px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.slider-ends {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--muted);
+}
+.day-nav.center-nav {
+  justify-content: center;
+  margin-top: 8px;
+}
+.row-dim td {
+  opacity: 0.5;
+}

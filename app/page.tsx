@@ -132,79 +132,90 @@ function Heatmap({ r, selected, onSelect }: { r: Result; selected: number; onSel
 
 // ---- detail for one trading day --------------------------------------------
 function DayDetail({ day }: { day: DailyRecord }) {
+  const buys = day.actions.filter((a) => a.type === "BUY");
+  const sells = day.actions.filter((a) => a.type === "SELL");
+  const holds = day.actions.filter((a) => a.type === "HOLD");
+
   return (
     <div>
       <div className="day-totals">
         <div className="dt"><span>Equity</span><b className={cls(day.cumReturnPct)}>{money(day.equity)}</b></div>
         <div className="dt"><span>Cash idle</span><b>{money(day.cash)}</b></div>
         <div className="dt"><span>Invested</span><b>{money(day.invested)}</b></div>
-        <div className="dt"><span>Day P&amp;L</span><b className={cls(day.dayPnl)}>{day.dayPnl >= 0 ? "+" : ""}{money(day.dayPnl)}</b></div>
+        <div className="dt"><span>This day&rsquo;s P&amp;L</span><b className={cls(day.dayPnl)}>{day.dayPnl >= 0 ? "+" : ""}{money(day.dayPnl)}</b></div>
         <div className="dt"><span>Cumulative</span><b className={cls(day.cumReturnPct)}>{pct(day.cumReturnPct)}</b></div>
-        <div className="dt"><span>Positions</span><b>{day.holdings.length}</b></div>
+        <div className="dt"><span>Positions held</span><b>{day.holdings.length} / {20}</b></div>
       </div>
 
-      <div className="day-grid">
-        <div>
-          <div className="section-title sm">Scored &amp; ranked candidates — score = avg of the 3 factors: 4-day growth, 4-week growth, analyst upside ({day.ranked.length})</div>
-          <div className="tablewrap short">
-            <table>
-              <thead><tr><th>Rank</th><th>Ticker</th><th title="4-day price growth (factor 1)">4d ↑</th><th title="4-week price growth (factor 2)">4w ↑</th><th title="Analyst mean price-target upside (factor 3)">Analyst</th><th title="Equal-weight average of the three factors">Score</th><th>Rating</th><th>Action</th><th>$</th></tr></thead>
-              <tbody>
-                {day.ranked.map((c) => (
-                  <tr key={c.ticker} className={c.status === "BUY" ? "row-buy" : c.status === "HELD" ? "row-held" : ""}>
-                    <td>#{c.rank}</td>
-                    <td>{c.ticker}</td>
-                    <td className={cls(c.g4d)}>{sp(c.g4d)}</td>
-                    <td className={cls(c.g4w)}>{sp(c.g4w)}</td>
-                    <td className={cls(c.analyst)}>{sp(c.analyst)}</td>
-                    <td><b className={cls(c.score)}>{sp(c.score)}</b></td>
-                    <td className="muted">{c.recKey ? c.recKey.replace("_", " ") : "—"}</td>
-                    <td><span className={`tag ${c.status.toLowerCase()}`}>{c.status === "SKIPPED" ? "no slot" : c.status}</span></td>
-                    <td>{c.allocated > 0 ? money0(c.allocated) : "—"}</td>
-                  </tr>
-                ))}
-                {day.ranked.length === 0 && <tr><td colSpan={9} className="muted center">No entry signals this day.</td></tr>}
-              </tbody>
+      {/* What the strategy DID on this day: enter / exit / hold */}
+      <div className="eeh">
+        <div className="eeh-col enter">
+          <div className="eeh-head">🟢 ENTERING — {buys.length} buy{buys.length !== 1 ? "s" : ""}</div>
+          {buys.length === 0 ? <div className="eeh-empty">No new entries today.</div> : (
+            <table className="mini">
+              <thead><tr><th>Ticker</th><th>Why</th><th>Shares</th><th>Price</th><th>Spent</th></tr></thead>
+              <tbody>{buys.map((a, i) => (
+                <tr key={i}><td><b>{a.ticker}</b></td><td className="muted left">{a.reason}</td><td>{a.shares.toFixed(2)}</td><td>{money(a.price)}</td><td>{money0(a.allocated)}</td></tr>
+              ))}</tbody>
             </table>
-          </div>
+          )}
         </div>
 
-        <div>
-          <div className="section-title sm">Decisions executed today ({day.actions.length})</div>
-          <div className="tablewrap short">
-            <table>
-              <thead><tr><th>Action</th><th>Ticker</th><th>Shares</th><th>Price</th><th>Value</th><th>P&amp;L</th><th>Reason</th></tr></thead>
-              <tbody>
-                {day.actions.map((a, i) => (
-                  <tr key={i}>
-                    <td><span className={`tag ${a.type.toLowerCase()}`}>{a.type}</span></td>
-                    <td>{a.ticker}</td>
-                    <td>{a.shares.toFixed(3)}</td>
-                    <td>{money(a.price)}</td>
-                    <td>{money(a.allocated)}</td>
-                    <td className={cls(a.pnl)}>{a.pnl === null ? "—" : `${a.pnl >= 0 ? "+" : ""}${money(a.pnl)}`}{a.returnPct !== null ? ` (${(a.returnPct * 100).toFixed(1)}%)` : ""}</td>
-                    <td className="muted left">{a.reason ?? (a.type === "HOLD" ? "still trending" : "—")}</td>
-                  </tr>
-                ))}
-                {day.actions.length === 0 && <tr><td colSpan={7} className="muted center">No trades — fully in cash.</td></tr>}
-              </tbody>
+        <div className="eeh-col exit">
+          <div className="eeh-head">🔴 EXITING — {sells.length} sell{sells.length !== 1 ? "s" : ""}</div>
+          {sells.length === 0 ? <div className="eeh-empty">No exits today.</div> : (
+            <table className="mini">
+              <thead><tr><th>Ticker</th><th>Sold @</th><th>P&amp;L</th><th>Return</th><th>Reason</th></tr></thead>
+              <tbody>{sells.map((a, i) => (
+                <tr key={i}><td><b>{a.ticker}</b></td><td>{money(a.price)}</td><td className={cls(a.pnl)}>{a.pnl! >= 0 ? "+" : ""}{money(a.pnl!)}</td><td className={cls(a.returnPct)}>{sp(a.returnPct)}</td><td className="muted left">{a.reason}</td></tr>
+              ))}</tbody>
             </table>
-          </div>
+          )}
+        </div>
+
+        <div className="eeh-col hold">
+          <div className="eeh-head">🔵 HOLDING — {holds.length} kept</div>
+          {holds.length === 0 ? <div className="eeh-empty">Nothing carried over.</div> : (
+            <table className="mini">
+              <thead><tr><th>Ticker</th><th>Now</th><th>Unreal. P&amp;L</th><th>Return</th></tr></thead>
+              <tbody>{holds.map((a, i) => (
+                <tr key={i}><td><b>{a.ticker}</b></td><td>{money(a.price)}</td><td className={cls(a.pnl)}>{a.pnl! >= 0 ? "+" : ""}{money(a.pnl!)}</td><td className={cls(a.returnPct)}>{sp(a.returnPct)}</td></tr>
+              ))}</tbody>
+            </table>
+          )}
         </div>
       </div>
 
-      <div className="section-title sm">Portfolio at end of {day.date} — {money(day.invested)} across {day.holdings.length} positions + {money(day.cash)} cash</div>
+      {/* The ranking that produced those decisions */}
+      <div className="section-title sm">
+        Top stocks scored this day — only those passing the entry signal (4 up-days + 4 up-weeks + analyst Buy), ranked by the 3-factor score.
+        The top {20} fillable slots are bought ($500 each); ties beyond 20 or empty cash are skipped. ({day.ranked.length} eligible)
+      </div>
       <div className="tablewrap short">
         <table>
-          <thead><tr><th>Ticker</th><th>Shares</th><th>Entry date</th><th>Entry</th><th>Now</th><th>Value</th><th>Unrealized</th></tr></thead>
+          <thead><tr>
+            <th>Rank</th><th>Ticker</th>
+            <th title="Factor 1: price growth over the last 4 days">4-day ↑</th>
+            <th title="Factor 2: price growth over the last 4 weeks">4-week ↑</th>
+            <th title="Factor 3: analyst mean price-target upside">Analyst ↑</th>
+            <th title="Equal-weight average of the 3 factors">SCORE</th>
+            <th>Rating</th><th>Decision</th><th>Allocated</th>
+          </tr></thead>
           <tbody>
-            {day.holdings.map((h) => (
-              <tr key={h.ticker}>
-                <td>{h.ticker}</td><td>{h.shares.toFixed(3)}</td><td>{h.entryDate}</td><td>{money(h.entryPrice)}</td><td>{money(h.price)}</td><td>{money(h.value)}</td>
-                <td className={cls(h.unrealizedPct)}>{pct(h.unrealizedPct)}</td>
+            {day.ranked.map((c) => (
+              <tr key={c.ticker} className={c.rank <= 20 ? (c.status === "BUY" ? "row-buy" : c.status === "HELD" ? "row-held" : "") : "row-dim"}>
+                <td>#{c.rank}</td>
+                <td><b>{c.ticker}</b></td>
+                <td className={cls(c.g4d)}>{sp(c.g4d)}</td>
+                <td className={cls(c.g4w)}>{sp(c.g4w)}</td>
+                <td className={cls(c.analyst)}>{sp(c.analyst)}</td>
+                <td><b className={cls(c.score)}>{sp(c.score)}</b></td>
+                <td className="muted">{c.recKey ? c.recKey.replace("_", " ") : "—"}</td>
+                <td><span className={`tag ${c.status.toLowerCase()}`}>{c.status === "BUY" ? "BOUGHT" : c.status === "HELD" ? "ALREADY HELD" : "no slot/cash"}</span></td>
+                <td>{c.allocated > 0 ? money0(c.allocated) : "—"}</td>
               </tr>
             ))}
-            {day.holdings.length === 0 && <tr><td colSpan={7} className="muted center">Flat — no open positions.</td></tr>}
+            {day.ranked.length === 0 && <tr><td colSpan={9} className="muted center">No stock passed the entry signal on this day — strategy stays put.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -291,22 +302,35 @@ export default function Home() {
           </div>
 
           <div className="panel">
-            <div className="section-title">Daily move heatmap — green/red = each stock&rsquo;s % change per day, markers = strategy decisions. Click any day to inspect it below.</div>
+            <div className="section-title">① Pick a day — click any column in the grid, or use the slider/arrows below</div>
+            <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
+              Each row is a stock, each column a trading day. Cell color = that day&rsquo;s % move (green up / red down); letters mark what the
+              strategy did (<b>B</b>uy, <b>S</b>ell, · hold). The highlighted column is the selected day shown in full below.
+            </p>
             <Heatmap r={r} selected={selDay} onSelect={setSelDay} />
+            <input
+              className="day-slider"
+              type="range"
+              min={0}
+              max={r.dates.length - 1}
+              value={selDay}
+              onChange={(e) => setSelDay(Number(e.target.value))}
+              aria-label="Select trading day"
+            />
+            <div className="day-nav center-nav">
+              <button onClick={() => setSelDay(0)} disabled={selDay === 0}>⏮ First</button>
+              <button onClick={() => setSelDay(Math.max(0, selDay - 1))} disabled={selDay === 0}>‹ Prev</button>
+              <select value={selDay} onChange={(e) => setSelDay(Number(e.target.value))}>
+                {r.dates.map((d, i) => <option key={d} value={i}>Day {i + 1} — {d}</option>)}
+              </select>
+              <button onClick={() => setSelDay(Math.min(r.dates.length - 1, selDay + 1))} disabled={selDay === r.dates.length - 1}>Next ›</button>
+              <button onClick={() => setSelDay(r.dates.length - 1)} disabled={selDay === r.dates.length - 1}>Last ⏭</button>
+            </div>
           </div>
 
           {day && (
             <div className="panel">
-              <div className="day-head">
-                <div className="section-title" style={{ margin: 0 }}>Day {selDay + 1} of {r.dates.length} — {day.date}</div>
-                <div className="day-nav">
-                  <button onClick={() => setSelDay(Math.max(0, selDay - 1))} disabled={selDay === 0}>‹ Prev</button>
-                  <select value={selDay} onChange={(e) => setSelDay(Number(e.target.value))}>
-                    {r.dates.map((d, i) => <option key={d} value={i}>{d}</option>)}
-                  </select>
-                  <button onClick={() => setSelDay(Math.min(r.dates.length - 1, selDay + 1))} disabled={selDay === r.dates.length - 1}>Next ›</button>
-                </div>
-              </div>
+              <div className="section-title">② Day {selDay + 1} of {r.dates.length} · <span className="pos">{day.date}</span> — everything the strategy saw &amp; did</div>
               <DayDetail day={day} />
             </div>
           )}
