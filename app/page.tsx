@@ -6,17 +6,17 @@ import { useEffect, useMemo, useState } from "react";
 interface Etf { id: string; name: string; description: string; count: number }
 interface Trade { ticker: string; entryDate: string; entryPrice: number; exitDate: string | null; exitPrice: number | null; returnPct: number | null; pnl: number | null; exitReason: string | null }
 interface EquityPoint { date: string; equity: number; benchmark: number }
-interface RankedRow { ticker: string; rank: number; score: number; dayReturnPct: number | null; upDays: number; upWeeks: number; allocated: number; status: "BUY" | "HELD" | "SKIPPED" }
+interface RankedRow { ticker: string; rank: number; score: number; g4d: number; g4w: number; analyst: number; recKey: string | null; dayReturnPct: number | null; upDays: number; upWeeks: number; allocated: number; status: "BUY" | "HELD" | "SKIPPED" }
 interface DayAction { ticker: string; type: "BUY" | "SELL" | "HOLD"; shares: number; price: number; allocated: number; pnl: number | null; returnPct: number | null; reason: string | null }
 interface HoldingRow { ticker: string; shares: number; entryDate: string; entryPrice: number; price: number; value: number; unrealizedPct: number }
 interface DailyRecord { date: string; ranked: RankedRow[]; actions: DayAction[]; holdings: HoldingRow[]; cash: number; invested: number; equity: number; dayPnl: number; cumReturnPct: number }
 interface Result {
   startDate: string; endDate: string; endEquity: number; totalReturnPct: number; benchmarkReturnPct: number;
   maxDrawdownPct: number; numTrades: number; winRate: number; avgTradeReturnPct: number;
-  trades: Trade[]; equityCurve: EquityPoint[]; openPositionsAtEnd: HoldingRow[];
+  trades: Trade[]; equityCurve: EquityPoint[]; openPositionsAtEnd: HoldingRow[]; bullishCount: number;
   dates: string[]; tickers: string[]; returnsMatrix: (number | null)[][]; statusMatrix: number[][]; days: DailyRecord[];
 }
-interface ApiResponse { etf: { name: string }; params: Record<string, number>; tickersWithData: number; requestedTickers: number; result: Result }
+interface ApiResponse { etf: { name: string }; params: Record<string, number>; tickersWithData: number; requestedTickers: number; analystCovered: number; result: Result }
 
 // ---- helpers ---------------------------------------------------------------
 const pct = (x: number | null | undefined) => (x === null || x === undefined ? "—" : `${(x * 100).toFixed(2)}%`);
@@ -24,6 +24,7 @@ const money = (x: number) => x.toLocaleString("en-US", { style: "currency", curr
 const money0 = (x: number) => x.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 const cls = (x: number | null | undefined) => (x === null || x === undefined ? "" : x >= 0 ? "pos" : "neg");
 const shortDate = (d: string) => d.slice(5); // MM-DD
+const sp = (x: number | null | undefined) => (x === null || x === undefined ? "—" : `${x >= 0 ? "+" : ""}${(x * 100).toFixed(2)}%`); // signed %
 
 // daily-return cell color (green up / red down), intensity clamped at ±4%
 function heatColor(v: number | null): string {
@@ -144,24 +145,25 @@ function DayDetail({ day }: { day: DailyRecord }) {
 
       <div className="day-grid">
         <div>
-          <div className="section-title sm">Scored &amp; ranked candidates — both 4 up-days &amp; 4 up-weeks &amp; bullish ({day.ranked.length})</div>
+          <div className="section-title sm">Scored &amp; ranked candidates — score = avg of the 3 factors: 4-day growth, 4-week growth, analyst upside ({day.ranked.length})</div>
           <div className="tablewrap short">
             <table>
-              <thead><tr><th>Rank</th><th>Ticker</th><th>Score</th><th>Day %</th><th>↑Days</th><th>↑Wks</th><th>Action</th><th>Allocated</th></tr></thead>
+              <thead><tr><th>Rank</th><th>Ticker</th><th title="4-day price growth (factor 1)">4d ↑</th><th title="4-week price growth (factor 2)">4w ↑</th><th title="Analyst mean price-target upside (factor 3)">Analyst</th><th title="Equal-weight average of the three factors">Score</th><th>Rating</th><th>Action</th><th>$</th></tr></thead>
               <tbody>
                 {day.ranked.map((c) => (
                   <tr key={c.ticker} className={c.status === "BUY" ? "row-buy" : c.status === "HELD" ? "row-held" : ""}>
                     <td>#{c.rank}</td>
                     <td>{c.ticker}</td>
-                    <td>{c.score.toFixed(3)}</td>
-                    <td className={cls(c.dayReturnPct)}>{c.dayReturnPct === null ? "—" : `${c.dayReturnPct >= 0 ? "+" : ""}${(c.dayReturnPct * 100).toFixed(2)}%`}</td>
-                    <td>{c.upDays}</td>
-                    <td>{c.upWeeks}</td>
+                    <td className={cls(c.g4d)}>{sp(c.g4d)}</td>
+                    <td className={cls(c.g4w)}>{sp(c.g4w)}</td>
+                    <td className={cls(c.analyst)}>{sp(c.analyst)}</td>
+                    <td><b className={cls(c.score)}>{sp(c.score)}</b></td>
+                    <td className="muted">{c.recKey ? c.recKey.replace("_", " ") : "—"}</td>
                     <td><span className={`tag ${c.status.toLowerCase()}`}>{c.status === "SKIPPED" ? "no slot" : c.status}</span></td>
-                    <td>{c.allocated > 0 ? money(c.allocated) : "—"}</td>
+                    <td>{c.allocated > 0 ? money0(c.allocated) : "—"}</td>
                   </tr>
                 ))}
-                {day.ranked.length === 0 && <tr><td colSpan={8} className="muted center">No entry signals this day.</td></tr>}
+                {day.ranked.length === 0 && <tr><td colSpan={9} className="muted center">No entry signals this day.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -242,9 +244,10 @@ export default function Home() {
     <div className="wrap">
       <h1 className="title">SimpleTrade</h1>
       <p className="subtitle">
-        Daily end-of-day momentum backtester. Every trading day it scores the ETF&rsquo;s stocks, ranks those that fired the entry signal
-        (<b>4 consecutive up days AND 4 consecutive up weeks AND a bullish trend</b>), buys the top ranks with a $10,000 budget split into
-        20 equal $500 slots, then re-evaluates daily — holding or selling on two down days / a rapid drop. Everything below is the actual audited ledger.
+        Daily end-of-day momentum backtester. Entry requires <b>4 consecutive up days AND 4 consecutive up weeks AND analysts rating it Buy/Strong&nbsp;Buy</b>.
+        Eligible stocks are scored on exactly three factors — <b>4-day growth, 4-week growth, and analyst price-target upside</b> (equal-weight average) —
+        ranked, and the top ranks are bought with a $10,000 budget split into 20 equal $500 slots. Positions are re-evaluated daily and sold on two down
+        days or a rapid drop. Everything below is the actual audited ledger.
       </p>
 
       <div className="panel">
@@ -259,9 +262,9 @@ export default function Home() {
       </div>
 
       <div className="note">
-        <b>Data &amp; methodology:</b> split/dividend-adjusted daily prices from Yahoo Finance, cached on disk. Real analyst-rating feeds are paid, so
-        &ldquo;analyst bullish on fundamentals&rdquo; is a transparent proxy: price above its 200-day average <i>and</i> a positive 6-month return.
-        Research/education only — not investment advice.
+        <b>Data &amp; methodology:</b> split/dividend-adjusted daily prices and <b>real analyst ratings &amp; mean price targets</b> from Yahoo Finance, cached on disk.
+        One honest limitation: analyst ratings are <i>current</i> (Yahoo doesn&rsquo;t expose historical targets for free), so the same rating is applied
+        across the backtest window — a mild look-ahead on factor&nbsp;3. Research/education only — not investment advice.
       </div>
 
       {error && <div className="error">⚠ {error}</div>}
@@ -283,7 +286,7 @@ export default function Home() {
           </div>
 
           <div className="panel">
-            <div className="section-title">Equity curve — {data.etf.name} · {r.startDate} → {r.endDate} <span className="badge">{data.tickersWithData}/{data.requestedTickers} tickers with data</span></div>
+            <div className="section-title">Equity curve — {data.etf.name} · {r.startDate} → {r.endDate} <span className="badge">{data.tickersWithData}/{data.requestedTickers} price · {data.analystCovered} analyst-rated · {r.bullishCount} bullish</span></div>
             <EquityChart curve={r.equityCurve} />
           </div>
 

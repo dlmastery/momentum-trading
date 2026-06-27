@@ -10,11 +10,19 @@ daily end-of-day momentum strategy over a configurable window (default: last
 **Entry signal** (all must hold on the same day):
 - **4 consecutive up days** (close higher than prior close, 4 days running)
 - **4 consecutive up weeks** (4 rising weekly closes in a row)
-- **Bullish on fundamentals** — see the note below on how this is approximated
+- **Analysts bullish** — Yahoo analyst consensus is Buy or Strong Buy
 
-**Ranking / "return potential" score** — eligible stocks are scored by a
-composite momentum score (6-month return + distance above the 200-day average
-+ 1-month return). The **top 20** by score are held, equal-weighted.
+**Ranking / "return potential" score** — eligible stocks are scored on exactly
+**three factors, equal-weighted**, all expressed as percentages:
+
+```
+score = ( 4-day price growth
+        + 4-week price growth
+        + analyst mean price-target upside ) / 3
+```
+
+The candidates are sorted by score (highest first) and the **top ranks** are
+bought into 20 equal **$500 slots** ($10,000 ÷ 20).
 
 **Position management** — re-evaluated every end-of-day. A position is **exited**
 when either:
@@ -34,12 +42,13 @@ All thresholds live in `lib/strategy.ts` (`PARAMS`) and are easy to tune.
   daily bars, fetched with limited concurrency and **cached on disk** under
   `.cache/prices/` (12-hour TTL). The first run for a universe fills the cache;
   subsequent runs are near-instant.
+- **Analyst ratings**: **real** Yahoo Finance analyst consensus (`recommendationKey`)
+  and **mean price targets**, fetched via the crumb/cookie handshake in
+  `lib/analyst.ts` and cached on disk. One honest limitation: these are *current*
+  values (Yahoo doesn't expose historical targets for free), so the same rating is
+  applied across the backtest window — a mild look-ahead on factor 3.
 - **Constituents**: bundled recent snapshots in `lib/etfs.ts` (live, point-in-time
   index membership requires a paid provider).
-- **"Analyst bullish on fundamentals"**: real-time analyst ratings require a paid
-  data feed, so this is approximated by a transparent **trend/quality proxy** —
-  price **above its 200-day moving average** *and* a **positive 6-month return**.
-  Swap in a real ratings API in `bullishFundamentals()` if you have one.
 
 > Research/education tool only. Not investment advice. Past performance — even
 > simulated — does not predict future results.

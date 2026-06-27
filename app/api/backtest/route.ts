@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getEtf } from "@/lib/etfs";
 import { getManyBars } from "@/lib/prices";
+import { getManyAnalyst } from "@/lib/analyst";
 import { backtest, buildSeries, TickerSeries, PARAMS } from "@/lib/strategy";
 
 export const runtime = "nodejs";
@@ -18,7 +19,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `Unknown ETF '${etfId}'` }, { status: 400 });
     }
 
-    const barsMap = await getManyBars(etf.tickers, years);
+    // Fetch prices and analyst ratings in parallel (both cached on disk).
+    const [barsMap, analystMap] = await Promise.all([
+      getManyBars(etf.tickers, years),
+      getManyAnalyst(etf.tickers),
+    ]);
 
     const seriesMap: Record<string, TickerSeries> = {};
     let withData = 0;
@@ -36,7 +41,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const result = backtest(seriesMap, monthsBack);
+    const result = backtest(seriesMap, analystMap, monthsBack);
+    const analystCovered = Object.values(analystMap).filter((a) => a.targetUpside !== null).length;
 
     return NextResponse.json({
       etf: { id: etf.id, name: etf.name, description: etf.description },
@@ -45,6 +51,7 @@ export async function POST(req: NextRequest) {
       monthsBack,
       requestedTickers: etf.tickers.length,
       tickersWithData: withData,
+      analystCovered,
       result,
     });
   } catch (err: unknown) {
