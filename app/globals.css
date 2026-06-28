@@ -641,3 +641,63 @@ table.mini td {
   color: var(--muted);
   margin-top: 8px;
 }
+
+/* ---- funnel ---- */
+.funnel {
+  display: flex;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0 18px;
+}
+.fn {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 12px;
+  text-align: center;
+  min-width: 72px;
+}
+.fn b {
+  display: block;
+  font-size: 19px;
+  line-height: 1.1;
+}
+.fn span {
+  font-size: 10.5px;
+  color: var(--muted);
+}
+.fn.hot {
+  border-color: rgba(46, 204, 113, 0.5);
+  background: rgba(46, 204, 113, 0.08);
+}
+.fn.act {
+  border-color: rgba(79, 157, 255, 0.4);
+}
+.fn-arrow {
+  display: flex;
+  align-items: center;
+  color: var(--muted);
+  font-size: 16px;
+}
+
+/* ---- segmented filter ---- */
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  overflow: hidden;
+}
+.seg button {
+  background: var(--panel-2);
+  color: var(--muted);
+  border: none;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.seg button.on {
+  background: var(--accent);
+  color: #04121f;
+  font-weight: 700;
+}

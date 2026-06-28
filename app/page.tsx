@@ -9,7 +9,9 @@ interface EquityPoint { date: string; equity: number; benchmark: number }
 interface RankedRow { ticker: string; rank: number; score: number; g4d: number; g4w: number; analyst: number; recKey: string | null; dayReturnPct: number | null; upDays: number; upWeeks: number; allocated: number; status: "BUY" | "HELD" | "SKIPPED" }
 interface DayAction { ticker: string; type: "BUY" | "SELL" | "HOLD"; shares: number; price: number; allocated: number; pnl: number | null; returnPct: number | null; reason: string | null }
 interface HoldingRow { ticker: string; shares: number; entryDate: string; entryPrice: number; price: number; value: number; unrealizedPct: number }
-interface DailyRecord { date: string; ranked: RankedRow[]; actions: DayAction[]; holdings: HoldingRow[]; cash: number; invested: number; equity: number; dayPnl: number; cumReturnPct: number }
+interface ScanRow { ticker: string; close: number; dayReturnPct: number | null; upDays: number; upWeeks: number; recKey: string | null; g4d: number | null; g4w: number | null; analyst: number | null; score: number | null; eligible: boolean; status: "BUY" | "SELL" | "HELD" | "SKIPPED" | "—"; fail: string }
+interface Funnel { total: number; upToday: number; up4days: number; up4daysWeeks: number; eligible: number; bought: number; held: number; sold: number }
+interface DailyRecord { date: string; ranked: RankedRow[]; actions: DayAction[]; holdings: HoldingRow[]; scan: ScanRow[]; funnel: Funnel; cash: number; invested: number; equity: number; dayPnl: number; cumReturnPct: number }
 interface Result {
   startDate: string; endDate: string; endEquity: number; totalReturnPct: number; benchmarkReturnPct: number;
   maxDrawdownPct: number; numTrades: number; winRate: number; avgTradeReturnPct: number;
@@ -186,36 +188,82 @@ function DayDetail({ day }: { day: DailyRecord }) {
         </div>
       </div>
 
-      {/* The ranking that produced those decisions */}
-      <div className="section-title sm">
-        Top stocks scored this day — only those passing the entry signal (4 up-days + 4 up-weeks + analyst Buy), ranked by the 3-factor score.
-        The top {20} fillable slots are bought ($500 each); ties beyond 20 or empty cash are skipped. ({day.ranked.length} eligible)
+      {/* Funnel — why this many names qualified */}
+      <div className="funnel">
+        <div className="fn"><b>{day.funnel.total}</b><span>stocks today</span></div>
+        <div className="fn-arrow">→</div>
+        <div className="fn"><b>{day.funnel.upToday}</b><span>closed up</span></div>
+        <div className="fn-arrow">→</div>
+        <div className="fn"><b>{day.funnel.up4days}</b><span>4 up-days</span></div>
+        <div className="fn-arrow">→</div>
+        <div className="fn"><b>{day.funnel.up4daysWeeks}</b><span>+4 up-weeks</span></div>
+        <div className="fn-arrow">→</div>
+        <div className="fn hot"><b>{day.funnel.eligible}</b><span>+analyst Buy = eligible</span></div>
+        <div className="fn-arrow">⇒</div>
+        <div className="fn act"><b>{day.funnel.bought}</b><span>bought</span></div>
+        <div className="fn act"><b>{day.funnel.held}</b><span>held</span></div>
+        <div className="fn act"><b>{day.funnel.sold}</b><span>sold</span></div>
+      </div>
+
+      <UniverseScan scan={day.scan} />
+    </div>
+  );
+}
+
+function UniverseScan({ scan }: { scan: ScanRow[] }) {
+  const [filter, setFilter] = useState<"eligible" | "up" | "all">("eligible");
+  const rows = scan.filter((s) =>
+    filter === "all" ? true : filter === "eligible" ? s.eligible || s.status === "HELD" || s.status === "SELL" : (s.dayReturnPct ?? 0) > 0 || s.eligible
+  );
+  const decisionTag = (s: ScanRow) =>
+    s.status === "BUY" ? <span className="tag buy">BOUGHT</span>
+    : s.status === "SELL" ? <span className="tag sell">SOLD</span>
+    : s.status === "HELD" ? <span className="tag held">HELD</span>
+    : s.eligible ? <span className="tag skipped">eligible · no slot</span>
+    : <span className="muted left" style={{ fontSize: 12 }}>{s.fail}</span>;
+
+  return (
+    <div>
+      <div className="day-head">
+        <div className="section-title sm" style={{ margin: 0 }}>
+          Full universe scan — every stock and exactly why it did or didn&rsquo;t qualify ({rows.length} shown)
+        </div>
+        <div className="seg">
+          <button className={filter === "eligible" ? "on" : ""} onClick={() => setFilter("eligible")}>Eligible &amp; positions</button>
+          <button className={filter === "up" ? "on" : ""} onClick={() => setFilter("up")}>Up today</button>
+          <button className={filter === "all" ? "on" : ""} onClick={() => setFilter("all")}>All</button>
+        </div>
       </div>
       <div className="tablewrap short">
         <table>
           <thead><tr>
-            <th>Rank</th><th>Ticker</th>
-            <th title="Factor 1: price growth over the last 4 days">4-day ↑</th>
-            <th title="Factor 2: price growth over the last 4 weeks">4-week ↑</th>
-            <th title="Factor 3: analyst mean price-target upside">Analyst ↑</th>
-            <th title="Equal-weight average of the 3 factors">SCORE</th>
-            <th>Rating</th><th>Decision</th><th>Allocated</th>
+            <th>Ticker</th><th>Close</th><th>Day %</th>
+            <th title="Consecutive up days (need 4)">Up days</th>
+            <th title="Consecutive up weeks (need 4)">Up wks</th>
+            <th>Analyst</th>
+            <th title="4-day growth">4d ↑</th>
+            <th title="4-week growth">4w ↑</th>
+            <th title="Analyst price-target upside">An ↑</th>
+            <th title="3-factor score (eligible only)">Score</th>
+            <th>Decision / why excluded</th>
           </tr></thead>
           <tbody>
-            {day.ranked.map((c) => (
-              <tr key={c.ticker} className={c.rank <= 20 ? (c.status === "BUY" ? "row-buy" : c.status === "HELD" ? "row-held" : "") : "row-dim"}>
-                <td>#{c.rank}</td>
-                <td><b>{c.ticker}</b></td>
-                <td className={cls(c.g4d)}>{sp(c.g4d)}</td>
-                <td className={cls(c.g4w)}>{sp(c.g4w)}</td>
-                <td className={cls(c.analyst)}>{sp(c.analyst)}</td>
-                <td><b className={cls(c.score)}>{sp(c.score)}</b></td>
-                <td className="muted">{c.recKey ? c.recKey.replace("_", " ") : "—"}</td>
-                <td><span className={`tag ${c.status.toLowerCase()}`}>{c.status === "BUY" ? "BOUGHT" : c.status === "HELD" ? "ALREADY HELD" : "no slot/cash"}</span></td>
-                <td>{c.allocated > 0 ? money0(c.allocated) : "—"}</td>
+            {rows.map((s) => (
+              <tr key={s.ticker} className={s.status === "BUY" ? "row-buy" : s.status === "HELD" ? "row-held" : s.eligible ? "" : "row-dim"}>
+                <td><b>{s.ticker}</b></td>
+                <td>{money(s.close)}</td>
+                <td className={cls(s.dayReturnPct)}>{sp(s.dayReturnPct)}</td>
+                <td className={s.upDays >= 4 ? "pos" : ""}>{s.upDays}{s.upDays >= 4 ? " ✓" : ""}</td>
+                <td className={s.upWeeks >= 4 ? "pos" : ""}>{s.upWeeks}{s.upWeeks >= 4 ? " ✓" : ""}</td>
+                <td className="muted">{s.recKey ? s.recKey.replace("_", " ") : "—"}</td>
+                <td className={cls(s.g4d)}>{sp(s.g4d)}</td>
+                <td className={cls(s.g4w)}>{sp(s.g4w)}</td>
+                <td className={cls(s.analyst)}>{sp(s.analyst)}</td>
+                <td>{s.score !== null ? <b className={cls(s.score)}>{sp(s.score)}</b> : "—"}</td>
+                <td className="left">{decisionTag(s)}</td>
               </tr>
             ))}
-            {day.ranked.length === 0 && <tr><td colSpan={9} className="muted center">No stock passed the entry signal on this day — strategy stays put.</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={11} className="muted center">Nothing matches this filter.</td></tr>}
           </tbody>
         </table>
       </div>

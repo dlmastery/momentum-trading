@@ -189,11 +189,42 @@ export interface HoldingRow {
   unrealizedPct: number;
 }
 
+/** One row in the full-universe scan for a day (every stock, pass or fail). */
+export interface ScanRow {
+  ticker: string;
+  close: number;
+  dayReturnPct: number | null;
+  upDays: number;
+  upWeeks: number;
+  recKey: string | null;
+  g4d: number | null;
+  g4w: number | null;
+  analyst: number | null;
+  score: number | null; // only when eligible
+  eligible: boolean;
+  status: "BUY" | "SELL" | "HELD" | "SKIPPED" | "—";
+  fail: string; // "" if eligible, else which gate failed
+}
+
+/** Funnel counts showing why so few (or many) names qualify on a day. */
+export interface Funnel {
+  total: number; // stocks with a bar today
+  upToday: number; // closed up today
+  up4days: number; // 4 consecutive up days
+  up4daysWeeks: number; // + 4 consecutive up weeks
+  eligible: number; // + analyst bullish (full entry signal)
+  bought: number;
+  held: number;
+  sold: number;
+}
+
 export interface DailyRecord {
   date: string;
   ranked: RankedRow[];
   actions: DayAction[];
   holdings: HoldingRow[];
+  scan: ScanRow[];
+  funnel: Funnel;
   cash: number;
   invested: number;
   equity: number;
@@ -389,12 +420,73 @@ export function backtest(
     peakEquity = Math.max(peakEquity, equity);
     maxDrawdown = Math.max(maxDrawdown, (peakEquity - equity) / peakEquity);
 
+    // 5) Full-universe scan + funnel — why each stock did or didn't qualify.
+    const r2 = (x: number | null | undefined) => (x === null || x === undefined ? null : Math.round(x * 10000) / 10000);
+    const funnel: Funnel = { total: 0, upToday: 0, up4days: 0, up4daysWeeks: 0, eligible: 0, bought: 0, held: 0, sold: 0 };
+    const scan: ScanRow[] = [];
+    for (const s of allSeries) {
+      const i = s.dateToIdx.get(date);
+      if (i === undefined) continue;
+      funnel.total++;
+      const dr = s.dayReturn[i];
+      if (dr !== null && dr > 0) funnel.upToday++;
+      const upDays = s.upDays[i];
+      const upWeeks = s.weekUpStreak[i];
+      const a = analystMap[s.ticker];
+      const bull = isBullish(a);
+      const hitDays = upDays >= PARAMS.consecutiveUpDays;
+      const hitWeeks = hitDays && upWeeks >= PARAMS.consecutiveUpWeeks;
+      const eligible = hitWeeks && bull;
+      if (hitDays) funnel.up4days++;
+      if (hitWeeks) funnel.up4daysWeeks++;
+      if (eligible) funnel.eligible++;
+
+      let status: ScanRow["status"] = "—";
+      if (soldToday.has(s.ticker)) status = "SELL";
+      else if (boughtToday.has(s.ticker)) status = "BUY";
+      else if (open.has(s.ticker)) status = "HELD";
+      else if (eligible) status = "SKIPPED";
+
+      let fail = "";
+      if (!hitDays) fail = `only ${upDays}/${PARAMS.consecutiveUpDays} up days`;
+      else if (!hitWeeks) fail = `only ${upWeeks}/${PARAMS.consecutiveUpWeeks} up weeks`;
+      else if (!bull) fail = `analyst: ${a?.recommendationKey ?? "no rating"}`;
+
+      const f = eligible ? scoreFactors(s, i, a) : null;
+      scan.push({
+        ticker: s.ticker,
+        close: s.bars[i].close,
+        dayReturnPct: r2(dr),
+        upDays,
+        upWeeks,
+        recKey: a?.recommendationKey ?? null,
+        g4d: r2(s.growth4d[i]),
+        g4w: r2(s.growth4w[i]),
+        analyst: r2(a?.targetUpside ?? null),
+        score: f ? r2(f.score) : null,
+        eligible,
+        status,
+        fail,
+      });
+    }
+    funnel.bought = boughtToday.size;
+    funnel.sold = soldToday.size;
+    funnel.held = open.size - boughtToday.size;
+    // eligible first (by score desc), then the rest by day return desc.
+    scan.sort((a, b) => {
+      if (a.eligible !== b.eligible) return a.eligible ? -1 : 1;
+      if (a.eligible && b.eligible) return (b.score ?? 0) - (a.score ?? 0);
+      return (b.dayReturnPct ?? -9) - (a.dayReturnPct ?? -9);
+    });
+
     equityCurve.push({ date, equity, cash, positions: open.size, benchmark: benchVal });
     days.push({
       date,
       ranked,
       actions: actions.sort((a, b) => ({ SELL: 0, BUY: 1, HOLD: 2 } as const)[a.type] - ({ SELL: 0, BUY: 1, HOLD: 2 } as const)[b.type]),
       holdings,
+      scan,
+      funnel,
       cash,
       invested,
       equity,
