@@ -27,14 +27,39 @@ bought into 20 equal **$500 slots** ($10,000 ÷ 20).
 **Position management** — re-evaluated every end-of-day. A position is **exited**
 when either:
 - **2 consecutive down days**, or
-- a **rapid drop** of ≥ 7% in a single day.
+- a **rapid drop** of ≥ 20% in a single day.
 
-Freed capital is redeployed into the next-highest-scoring new signals.
+A single down day does **not** sell — you hold through it and only exit on two
+in a row (or the rapid drop). Freed capital is redeployed into the
+next-highest-scoring new signals.
 
 A **benchmark** (equal-weight buy & hold of the whole universe over the window)
 is plotted alongside the strategy equity curve for comparison.
 
 All thresholds live in `lib/strategy.ts` (`PARAMS`) and are easy to tune.
+
+## What the UI shows (full audit trail)
+
+Everything is laid out as an auditable, day-by-day ledger:
+
+- **Summary cards** — final equity, strategy vs benchmark return, max drawdown,
+  win rate, etc.
+- **Equity curve** vs the benchmark.
+- **Day picker** — a heatmap grid (every stock × every day, green/red by daily
+  move, with B/S/hold markers), plus a slider and First/Prev/Next/Last controls.
+  Click any column to inspect that day.
+- **Per-day inspector** for the selected day:
+  - Portfolio totals (equity, cash, invested, that day's P&L, cumulative).
+  - **Entering / Exiting / Holding** blocks — exactly what was bought, sold
+    (with realised P&L and reason), and carried over.
+  - A **qualification funnel** — e.g. `95 stocks → 42 up → 6 with 4 up-days →
+    1 with 4 up-weeks → 1 analyst-Buy → 1 eligible` — so it's obvious why so
+    few names trade on a given day (it's the strict gate, not a bug).
+  - A **full-index scan**: *every* stock ranked by score, with its last 4 days
+    and last 4 weeks as 🟩/🟥 squares, the up-day/up-week streak counts, analyst
+    rating, the three factor values, an **In-trade** flag, and the exact reason
+    it was or wasn't traded.
+- **Full trade log** of every round trip.
 
 ## Data & the "analyst ratings" approximation
 
@@ -52,6 +77,24 @@ All thresholds live in `lib/strategy.ts` (`PARAMS`) and are easy to tune.
 
 > Research/education tool only. Not investment advice. Past performance — even
 > simulated — does not predict future results.
+
+## Limitations a skeptical analyst should know
+
+This is a teaching scaffold, not a demonstrated edge. Known weaknesses:
+
+- **Survivorship bias** — the constituent lists are *current* index members, so
+  delisted/dropped names are absent, which flatters results.
+- **Look-ahead on analyst data** — current analyst ratings/targets are applied
+  across the whole backtest (no free historical feed).
+- **Same-close execution** — the signal is computed on a day's close and the
+  trade is filled at that same close; a realistic test would trade next open.
+- **No costs** — no commissions, spread, or slippage; fractional shares assumed.
+- **Short-horizon signals** — "4 up days / 4 up weeks" sit in the window where
+  the literature documents *short-term reversal* (mean reversion); classic
+  momentum uses 6–12 month returns. Analyst rating *levels* are also weaker
+  signals than *revisions*.
+- **Tiny sample** — a 6-month window with a few dozen trades is not statistically
+  meaningful.
 
 ## Run it
 
@@ -80,9 +123,9 @@ ALLOW_INSECURE_TLS=1 npm run dev              # bash
 
 - **Next.js (App Router)** + React, TypeScript.
 - `lib/etfs.ts` — constituent lists.
-- `lib/prices.ts` — data fetching + on-disk cache.
-- `lib/strategy.ts` — indicators, entry/exit signals, scoring, and the
-  lookahead-free daily backtest engine.
+- `lib/prices.ts` — price data fetching + on-disk cache.
+- `lib/analyst.ts` — Yahoo analyst ratings/targets (crumb handshake) + cache.
+- `lib/strategy.ts` — indicators, entry/exit signals, scoring, the daily
+  backtest engine, and the per-day universe scan/funnel.
 - `app/api/backtest` — runs a backtest for a requested ETF/window.
-- `app/page.tsx` — UI: controls, summary cards, equity curve, trade log.
-```
+- `app/page.tsx` — UI: controls, summary, equity curve, day inspector, trade log.
