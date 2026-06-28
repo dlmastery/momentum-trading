@@ -264,7 +264,7 @@ function UniverseScan({ scan }: { scan: ScanRow[] }) {
             <th title="Factor 1: 4-day growth">4d</th>
             <th title="Factor 2: 4-week growth">4w</th>
             <th title="Factor 3: analyst upside">An</th>
-            <th title="Equal-weight average of the 3 factors — computed for EVERY stock">SCORE</th>
+            <th title="Equal-weight average of the 3 factors — only when the entry criteria are met, else 0">SCORE</th>
             <th>Decision / why not traded</th>
           </tr></thead>
           <tbody>
@@ -283,7 +283,7 @@ function UniverseScan({ scan }: { scan: ScanRow[] }) {
                 <td className={cls(s.g4d)}>{sp(s.g4d)}</td>
                 <td className={cls(s.g4w)}>{sp(s.g4w)}</td>
                 <td className={cls(s.analyst)}>{sp(s.analyst)}</td>
-                <td><b className={cls(s.score)}>{sp(s.score)}</b></td>
+                <td>{s.eligible ? <b className="pos">{sp(s.score)}</b> : <span className="muted">0</span>}</td>
                 <td className="left">{decisionTag(s)}</td>
               </tr>
             ))}

@@ -480,7 +480,8 @@ export function backtest(
         last4weeks.push(idx >= 1 ? wc[idx] > wc[idx - 1] : null);
       }
 
-      const f = scoreFactors(s, i, a); // score EVERY stock
+      // Score is only meaningful when the entry criteria are met; otherwise 0.
+      const f = scoreFactors(s, i, a);
       scan.push({
         ticker: s.ticker,
         rank: 0,
@@ -494,7 +495,7 @@ export function backtest(
         g4d: r2(s.growth4d[i]),
         g4w: r2(s.growth4w[i]),
         analyst: r2(a?.targetUpside ?? null),
-        score: r2(f.score) as number,
+        score: eligible ? (r2(f.score) as number) : 0,
         eligible,
         inTrade,
         status,
