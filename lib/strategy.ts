@@ -40,6 +40,8 @@ export interface TickerSeries {
   growth4d: (number | null)[]; // FACTOR 1: % growth over last 4 days
   growth4w: (number | null)[]; // FACTOR 2: % growth over last 4 completed weeks
   dayReturn: (number | null)[];
+  weeklyCloses: number[]; // closing price of each completed week, in order
+  completedWeeksAt: number[]; // # of weeks completed as of each daily index
 }
 
 export function buildSeries(ticker: string, bars: Bar[]): TickerSeries {
@@ -54,6 +56,7 @@ export function buildSeries(ticker: string, bars: Bar[]): TickerSeries {
   const dateToIdx = new Map<string, number>();
 
   const completedWeekCloses: number[] = [];
+  const completedWeeksAt = new Array<number>(n).fill(0);
   let curWeekKey = n > 0 ? isoWeekKey(bars[0].date) : "";
   let curWeekClose = n > 0 ? close[0] : 0;
 
@@ -88,6 +91,7 @@ export function buildSeries(ticker: string, bars: Bar[]): TickerSeries {
       else break;
     }
     weekUpStreak[i] = ws;
+    completedWeeksAt[i] = completedWeekCloses.length;
 
     // FACTOR 2 — growth over the last 4 completed weeks
     const L = completedWeekCloses.length - 1;
@@ -96,7 +100,11 @@ export function buildSeries(ticker: string, bars: Bar[]): TickerSeries {
     }
   }
 
-  return { ticker, bars, dateToIdx, upDays, downDays, weekUpStreak, growth4d, growth4w, dayReturn };
+  return {
+    ticker, bars, dateToIdx, upDays, downDays, weekUpStreak, growth4d, growth4w, dayReturn,
+    weeklyCloses: completedWeekCloses,
+    completedWeeksAt,
+  };
 }
 
 /**
@@ -192,16 +200,20 @@ export interface HoldingRow {
 /** One row in the full-universe scan for a day (every stock, pass or fail). */
 export interface ScanRow {
   ticker: string;
+  rank: number; // rank across the WHOLE index by score (1 = highest)
   close: number;
   dayReturnPct: number | null;
   upDays: number;
   upWeeks: number;
+  last4days: (boolean | null)[]; // up/down for each of the last 4 days (old→new)
+  last4weeks: (boolean | null)[]; // up/down for each of the last 4 weeks (old→new)
   recKey: string | null;
   g4d: number | null;
   g4w: number | null;
   analyst: number | null;
-  score: number | null; // only when eligible
+  score: number; // 3-factor score for every stock
   eligible: boolean;
+  inTrade: boolean; // currently holding this name at end of day
   status: "BUY" | "SELL" | "HELD" | "SKIPPED" | "—";
   fail: string; // "" if eligible, else which gate failed
 }
@@ -441,10 +453,11 @@ export function backtest(
       if (hitWeeks) funnel.up4daysWeeks++;
       if (eligible) funnel.eligible++;
 
+      const inTrade = open.has(s.ticker);
       let status: ScanRow["status"] = "—";
       if (soldToday.has(s.ticker)) status = "SELL";
       else if (boughtToday.has(s.ticker)) status = "BUY";
-      else if (open.has(s.ticker)) status = "HELD";
+      else if (inTrade) status = "HELD";
       else if (eligible) status = "SKIPPED";
 
       let fail = "";
@@ -452,19 +465,38 @@ export function backtest(
       else if (!hitWeeks) fail = `only ${upWeeks}/${PARAMS.consecutiveUpWeeks} up weeks`;
       else if (!bull) fail = `analyst: ${a?.recommendationKey ?? "no rating"}`;
 
-      const f = eligible ? scoreFactors(s, i, a) : null;
+      // last 4 daily moves (oldest -> newest)
+      const last4days: (boolean | null)[] = [];
+      for (let k = 3; k >= 0; k--) {
+        const d = s.dayReturn[i - k];
+        last4days.push(i - k >= 1 && d !== null ? d > 0 : null);
+      }
+      // last 4 weekly moves (oldest -> newest), week-over-week closes
+      const last4weeks: (boolean | null)[] = [];
+      const wc = s.weeklyCloses;
+      const L = s.completedWeeksAt[i] - 1; // index of most recent completed week
+      for (let k = 3; k >= 0; k--) {
+        const idx = L - k;
+        last4weeks.push(idx >= 1 ? wc[idx] > wc[idx - 1] : null);
+      }
+
+      const f = scoreFactors(s, i, a); // score EVERY stock
       scan.push({
         ticker: s.ticker,
+        rank: 0,
         close: s.bars[i].close,
         dayReturnPct: r2(dr),
         upDays,
         upWeeks,
+        last4days,
+        last4weeks,
         recKey: a?.recommendationKey ?? null,
         g4d: r2(s.growth4d[i]),
         g4w: r2(s.growth4w[i]),
         analyst: r2(a?.targetUpside ?? null),
-        score: f ? r2(f.score) : null,
+        score: r2(f.score) as number,
         eligible,
+        inTrade,
         status,
         fail,
       });
@@ -472,12 +504,9 @@ export function backtest(
     funnel.bought = boughtToday.size;
     funnel.sold = soldToday.size;
     funnel.held = open.size - boughtToday.size;
-    // eligible first (by score desc), then the rest by day return desc.
-    scan.sort((a, b) => {
-      if (a.eligible !== b.eligible) return a.eligible ? -1 : 1;
-      if (a.eligible && b.eligible) return (b.score ?? 0) - (a.score ?? 0);
-      return (b.dayReturnPct ?? -9) - (a.dayReturnPct ?? -9);
-    });
+    // Rank the WHOLE index by score (highest first).
+    scan.sort((a, b) => b.score - a.score);
+    scan.forEach((row, idx) => (row.rank = idx + 1));
 
     equityCurve.push({ date, equity, cash, positions: open.size, benchmark: benchVal });
     days.push({

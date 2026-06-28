@@ -9,7 +9,7 @@ interface EquityPoint { date: string; equity: number; benchmark: number }
 interface RankedRow { ticker: string; rank: number; score: number; g4d: number; g4w: number; analyst: number; recKey: string | null; dayReturnPct: number | null; upDays: number; upWeeks: number; allocated: number; status: "BUY" | "HELD" | "SKIPPED" }
 interface DayAction { ticker: string; type: "BUY" | "SELL" | "HOLD"; shares: number; price: number; allocated: number; pnl: number | null; returnPct: number | null; reason: string | null }
 interface HoldingRow { ticker: string; shares: number; entryDate: string; entryPrice: number; price: number; value: number; unrealizedPct: number }
-interface ScanRow { ticker: string; close: number; dayReturnPct: number | null; upDays: number; upWeeks: number; recKey: string | null; g4d: number | null; g4w: number | null; analyst: number | null; score: number | null; eligible: boolean; status: "BUY" | "SELL" | "HELD" | "SKIPPED" | "—"; fail: string }
+interface ScanRow { ticker: string; rank: number; close: number; dayReturnPct: number | null; upDays: number; upWeeks: number; last4days: (boolean | null)[]; last4weeks: (boolean | null)[]; recKey: string | null; g4d: number | null; g4w: number | null; analyst: number | null; score: number; eligible: boolean; inTrade: boolean; status: "BUY" | "SELL" | "HELD" | "SKIPPED" | "—"; fail: string }
 interface Funnel { total: number; upToday: number; up4days: number; up4daysWeeks: number; eligible: number; bought: number; held: number; sold: number }
 interface DailyRecord { date: string; ranked: RankedRow[]; actions: DayAction[]; holdings: HoldingRow[]; scan: ScanRow[]; funnel: Funnel; cash: number; invested: number; equity: number; dayPnl: number; cumReturnPct: number }
 interface Result {
@@ -210,60 +210,84 @@ function DayDetail({ day }: { day: DailyRecord }) {
   );
 }
 
+// 4 small red/green squares for a sequence of up/down moves (old → new)
+function Squares({ seq }: { seq: (boolean | null)[] }) {
+  return (
+    <span className="sq-row">
+      {seq.map((v, i) => (
+        <i key={i} className={`sq ${v === null ? "na" : v ? "up" : "dn"}`} title={v === null ? "n/a" : v ? "up" : "down"} />
+      ))}
+    </span>
+  );
+}
+
 function UniverseScan({ scan }: { scan: ScanRow[] }) {
-  const [filter, setFilter] = useState<"eligible" | "up" | "all">("eligible");
+  const [filter, setFilter] = useState<"all" | "intrade" | "eligible" | "up">("all");
   const rows = scan.filter((s) =>
-    filter === "all" ? true : filter === "eligible" ? s.eligible || s.status === "HELD" || s.status === "SELL" : (s.dayReturnPct ?? 0) > 0 || s.eligible
+    filter === "all" ? true
+    : filter === "intrade" ? s.inTrade || s.status === "SELL"
+    : filter === "eligible" ? s.eligible || s.inTrade || s.status === "SELL"
+    : (s.dayReturnPct ?? 0) > 0
   );
   const decisionTag = (s: ScanRow) =>
-    s.status === "BUY" ? <span className="tag buy">BOUGHT</span>
-    : s.status === "SELL" ? <span className="tag sell">SOLD</span>
-    : s.status === "HELD" ? <span className="tag held">HELD</span>
-    : s.eligible ? <span className="tag skipped">eligible · no slot</span>
+    s.status === "BUY" ? <span className="tag buy">BOUGHT today</span>
+    : s.status === "SELL" ? <span className="tag sell">SOLD today</span>
+    : s.status === "HELD" ? <span className="tag held">holding</span>
+    : s.eligible ? <span className="tag skipped">eligible · no slot/cash</span>
     : <span className="muted left" style={{ fontSize: 12 }}>{s.fail}</span>;
 
   return (
     <div>
       <div className="day-head">
         <div className="section-title sm" style={{ margin: 0 }}>
-          Full universe scan — every stock and exactly why it did or didn&rsquo;t qualify ({rows.length} shown)
+          Every stock in the index, ranked by 3-factor score — with its last 4 days &amp; 4 weeks (🟩 up / 🟥 down), streaks, and whether we&rsquo;re in the trade ({rows.length} shown)
         </div>
         <div className="seg">
-          <button className={filter === "eligible" ? "on" : ""} onClick={() => setFilter("eligible")}>Eligible &amp; positions</button>
+          <button className={filter === "all" ? "on" : ""} onClick={() => setFilter("all")}>All ranked</button>
+          <button className={filter === "intrade" ? "on" : ""} onClick={() => setFilter("intrade")}>In trade</button>
+          <button className={filter === "eligible" ? "on" : ""} onClick={() => setFilter("eligible")}>Eligible</button>
           <button className={filter === "up" ? "on" : ""} onClick={() => setFilter("up")}>Up today</button>
-          <button className={filter === "all" ? "on" : ""} onClick={() => setFilter("all")}>All</button>
         </div>
       </div>
-      <div className="tablewrap short">
-        <table>
+      <div className="tablewrap">
+        <table className="scan">
           <thead><tr>
-            <th>Ticker</th><th>Close</th><th>Day %</th>
-            <th title="Consecutive up days (need 4)">Up days</th>
-            <th title="Consecutive up weeks (need 4)">Up wks</th>
+            <th title="Rank across the whole index by score">#</th>
+            <th>Ticker</th>
+            <th title="Are we currently holding this stock?">In&nbsp;trade</th>
+            <th>Close</th><th>Day %</th>
+            <th title="Each of the last 4 days: green=up, red=down">Last 4 days</th>
+            <th title="Consecutive up days (need 4)">↑d</th>
+            <th title="Each of the last 4 weeks: green=up vs prior week, red=down">Last 4 weeks</th>
+            <th title="Consecutive up weeks (need 4)">↑w</th>
             <th>Analyst</th>
-            <th title="4-day growth">4d ↑</th>
-            <th title="4-week growth">4w ↑</th>
-            <th title="Analyst price-target upside">An ↑</th>
-            <th title="3-factor score (eligible only)">Score</th>
-            <th>Decision / why excluded</th>
+            <th title="Factor 1: 4-day growth">4d</th>
+            <th title="Factor 2: 4-week growth">4w</th>
+            <th title="Factor 3: analyst upside">An</th>
+            <th title="Equal-weight average of the 3 factors — computed for EVERY stock">SCORE</th>
+            <th>Decision / why not traded</th>
           </tr></thead>
           <tbody>
             {rows.map((s) => (
-              <tr key={s.ticker} className={s.status === "BUY" ? "row-buy" : s.status === "HELD" ? "row-held" : s.eligible ? "" : "row-dim"}>
+              <tr key={s.ticker} className={s.status === "BUY" ? "row-buy" : s.inTrade ? "row-held" : s.eligible ? "" : "row-dim"}>
+                <td>#{s.rank}</td>
                 <td><b>{s.ticker}</b></td>
+                <td>{s.inTrade ? <span className="tag held">IN</span> : <span className="muted">—</span>}</td>
                 <td>{money(s.close)}</td>
                 <td className={cls(s.dayReturnPct)}>{sp(s.dayReturnPct)}</td>
-                <td className={s.upDays >= 4 ? "pos" : ""}>{s.upDays}{s.upDays >= 4 ? " ✓" : ""}</td>
-                <td className={s.upWeeks >= 4 ? "pos" : ""}>{s.upWeeks}{s.upWeeks >= 4 ? " ✓" : ""}</td>
+                <td><Squares seq={s.last4days} /></td>
+                <td className={s.upDays >= 4 ? "pos" : ""}>{s.upDays}{s.upDays >= 4 ? "✓" : ""}</td>
+                <td><Squares seq={s.last4weeks} /></td>
+                <td className={s.upWeeks >= 4 ? "pos" : ""}>{s.upWeeks}{s.upWeeks >= 4 ? "✓" : ""}</td>
                 <td className="muted">{s.recKey ? s.recKey.replace("_", " ") : "—"}</td>
                 <td className={cls(s.g4d)}>{sp(s.g4d)}</td>
                 <td className={cls(s.g4w)}>{sp(s.g4w)}</td>
                 <td className={cls(s.analyst)}>{sp(s.analyst)}</td>
-                <td>{s.score !== null ? <b className={cls(s.score)}>{sp(s.score)}</b> : "—"}</td>
+                <td><b className={cls(s.score)}>{sp(s.score)}</b></td>
                 <td className="left">{decisionTag(s)}</td>
               </tr>
             ))}
-            {rows.length === 0 && <tr><td colSpan={11} className="muted center">Nothing matches this filter.</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={15} className="muted center">Nothing matches this filter.</td></tr>}
           </tbody>
         </table>
       </div>

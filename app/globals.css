@@ -701,3 +701,32 @@ table.mini td {
   color: #04121f;
   font-weight: 700;
 }
+
+/* ---- last 4 days / weeks squares ---- */
+.sq-row {
+  display: inline-flex;
+  gap: 2px;
+}
+.sq {
+  width: 13px;
+  height: 13px;
+  border-radius: 2px;
+  display: inline-block;
+}
+.sq.up {
+  background: var(--green);
+}
+.sq.dn {
+  background: var(--red);
+}
+.sq.na {
+  background: var(--border);
+}
+table.scan {
+  font-size: 12.5px;
+}
+table.scan th,
+table.scan td {
+  padding: 6px 8px;
+  white-space: nowrap;
+}
