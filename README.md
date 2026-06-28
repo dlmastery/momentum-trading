@@ -96,36 +96,55 @@ This is a teaching scaffold, not a demonstrated edge. Known weaknesses:
 - **Tiny sample** — a 6-month window with a few dozen trades is not statistically
   meaningful.
 
-## Run it
+## Fully static — runs in your browser, deploys to GitHub Pages
+
+All data is **pre-fetched into static JSON** and the **entire backtest runs
+client-side** — there is no server. That means you can host it on GitHub Pages
+(or any static host) and still get a fully interactive dashboard, including
+**tunable parameters** that re-run instantly.
+
+### 1. Generate the data (one-time / when refreshing)
+
+```bash
+node scripts/fetch-data.mjs
+# behind a TLS-intercepting corporate proxy:
+ALLOW_INSECURE_TLS=1 node scripts/fetch-data.mjs
+```
+
+This writes `public/data/{etf}.json` (prices + real Yahoo analyst ratings) and
+`public/data/etfs.json`. These files are committed to the repo.
+
+### 2. Develop / preview
 
 ```bash
 npm install
-npm run dev
-# open http://localhost:3000
+npm run dev          # http://localhost:3000
 ```
 
-Pick an ETF, set the history depth and backtest window, and click **Run backtest**.
-
-### Behind a TLS-intercepting (corporate) proxy
-
-If price fetches fail with `UNABLE_TO_VERIFY_LEAF_SIGNATURE`, your network is
-intercepting TLS. Opt into relaxed verification for local dev only:
-
-```powershell
-$env:ALLOW_INSECURE_TLS = "1"; npm run dev    # PowerShell
-```
+### 3. Build the static site
 
 ```bash
-ALLOW_INSECURE_TLS=1 npm run dev              # bash
+npm run build        # emits ./out (static export)
+BASE_PATH="" npm run build   # if serving from the domain root instead of /momentum-trading
 ```
+
+### Deploy to GitHub Pages
+
+`.github/workflows/deploy.yml` builds and deploys `./out` on every push to
+`main`. In the repo, set **Settings → Pages → Source = GitHub Actions**. The
+site publishes at `https://<user>.github.io/momentum-trading/` (the `basePath`
+in `next.config.mjs` matches the repo name).
 
 ## How it's built
 
-- **Next.js (App Router)** + React, TypeScript.
-- `lib/etfs.ts` — constituent lists.
-- `lib/prices.ts` — price data fetching + on-disk cache.
-- `lib/analyst.ts` — Yahoo analyst ratings/targets (crumb handshake) + cache.
+- **Next.js (App Router, static export)** + React, TypeScript.
+- `lib/types.ts` — pure, dependency-free types + `isBullish` (browser-safe).
 - `lib/strategy.ts` — indicators, entry/exit signals, scoring, the daily
-  backtest engine, and the per-day universe scan/funnel.
-- `app/api/backtest` — runs a backtest for a requested ETF/window.
-- `app/page.tsx` — UI: controls, summary, equity curve, day inspector, trade log.
+  backtest engine, the per-day universe scan/funnel. **Runs in the browser.**
+- `lib/etfs.json` / `lib/etfs.ts` — constituent lists (single source of truth).
+- `lib/loadData.ts` — loads the static JSON and runs the backtest client-side.
+- `scripts/fetch-data.mjs` — Node build script that pre-fetches all data.
+- `lib/prices.ts` / `lib/analyst.ts` — Node-only fetchers used by the script.
+- `app/page.tsx` — the whole dashboard: methodology doc, controls + tunable
+  parameters, summary, equity curve, day inspector, universe scan, trade log,
+  and the per-ticker chart modal.

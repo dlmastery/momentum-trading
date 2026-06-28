@@ -1,0 +1,23 @@
+[
+  {
+    "id": "nasdaq100",
+    "name": "Nasdaq-100",
+    "description": "100 largest non-financial companies on Nasdaq (proxy: QQQ).",
+    "count": 97,
+    "withData": 95
+  },
+  {
+    "id": "sp500",
+    "name": "S&P 500 (liquid subset)",
+    "description": "Broad cross-sector subset of the S&P 500 (proxy: SPY/VOO).",
+    "count": 120,
+    "withData": 119
+  },
+  {
+    "id": "dow30",
+    "name": "Dow Jones 30",
+    "description": "30 large-cap blue-chip US stocks (proxy: DIA).",
+    "count": 30,
+    "withData": 30
+  }
+]

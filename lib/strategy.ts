@@ -1,16 +1,62 @@
-import { Bar } from "./prices";
-import { AnalystInfo, isBullish } from "./analyst";
+import { Bar, AnalystInfo, isBullish } from "./types";
 
 // ---- Tunable strategy parameters -------------------------------------------
-export const PARAMS = {
-  consecutiveUpDays: 4, // "four consecutive days increase"
-  consecutiveUpWeeks: 4, // "four consecutive weeks increase"
-  rapidDropPct: 0.20, // single-day drop that forces an exit (20%)
-  consecutiveDownDays: 2, // "two consecutive downs" forces an exit
-  maxPositions: 20, // "pick top 20 stocks to trade"
-  budget: 10000, // "$10,000 budget"
-  minHistory: 30, // trading days needed to evaluate signals
+export interface ScoreWeights {
+  g4d: number; // weight on 4-day growth
+  g4w: number; // weight on 4-week growth
+  analyst: number; // weight on analyst upside
+}
+
+export interface StrategyParams {
+  consecutiveUpDays: number; // up days required to enter
+  consecutiveUpWeeks: number; // up weeks required to enter
+  rapidDropPct: number; // single-day drop that forces an exit
+  consecutiveDownDays: number; // consecutive down days that force an exit
+  maxPositions: number; // how many names to hold at most
+  budget: number; // total capital
+  weights: ScoreWeights; // score = weighted blend of the 3 factors
+}
+
+export const DEFAULT_PARAMS: StrategyParams = {
+  consecutiveUpDays: 4,
+  consecutiveUpWeeks: 4,
+  rapidDropPct: 0.2,
+  consecutiveDownDays: 2,
+  maxPositions: 20,
+  budget: 10000,
+  weights: { g4d: 1 / 3, g4w: 1 / 3, analyst: 1 / 3 },
 };
+
+/** Back-compat alias used by the UI to show defaults. */
+export const PARAMS = DEFAULT_PARAMS;
+
+const MIN_HISTORY = 30; // trading days needed to evaluate signals
+
+const clampInt = (v: unknown, lo: number, hi: number, dflt: number) => {
+  const n = Math.round(Number(v));
+  return Number.isFinite(n) ? Math.min(Math.max(n, lo), hi) : dflt;
+};
+
+/** Merge a partial request into a valid, clamped parameter set. */
+export function resolveParams(p?: Partial<Record<string, unknown>>): StrategyParams {
+  const d = DEFAULT_PARAMS;
+  if (!p) return d;
+  const w = (p.weights ?? {}) as Partial<ScoreWeights>;
+  let g4d = Number(w.g4d), g4w = Number(w.g4w), an = Number(w.analyst);
+  if (![g4d, g4w, an].every((x) => Number.isFinite(x) && x >= 0)) {
+    ({ g4d, g4w, analyst: an } = d.weights);
+  }
+  const sum = g4d + g4w + an || 1;
+  return {
+    consecutiveUpDays: clampInt(p.consecutiveUpDays, 1, 10, d.consecutiveUpDays),
+    consecutiveUpWeeks: clampInt(p.consecutiveUpWeeks, 1, 10, d.consecutiveUpWeeks),
+    consecutiveDownDays: clampInt(p.consecutiveDownDays, 1, 10, d.consecutiveDownDays),
+    rapidDropPct: Number.isFinite(Number(p.rapidDropPct)) ? Math.min(Math.max(Number(p.rapidDropPct), 0.01), 1) : d.rapidDropPct,
+    maxPositions: clampInt(p.maxPositions, 1, 100, d.maxPositions),
+    budget: Number.isFinite(Number(p.budget)) ? Math.min(Math.max(Number(p.budget), 100), 1e9) : d.budget,
+    weights: { g4d: g4d / sum, g4w: g4w / sum, analyst: an / sum },
+  };
+}
 
 // ---------------------------------------------------------------------------
 
@@ -111,30 +157,32 @@ export function buildSeries(ticker: string, bars: Bar[]): TickerSeries {
  * Entry signal — exactly as specified:
  *   4 consecutive up days  AND  4 consecutive up weeks  AND  analysts bullish.
  */
-export function buySignal(s: TickerSeries, i: number, a: AnalystInfo | undefined): boolean {
+export function buySignal(s: TickerSeries, i: number, a: AnalystInfo | undefined, p: StrategyParams): boolean {
   return (
-    s.upDays[i] >= PARAMS.consecutiveUpDays &&
-    s.weekUpStreak[i] >= PARAMS.consecutiveUpWeeks &&
+    s.upDays[i] >= p.consecutiveUpDays &&
+    s.weekUpStreak[i] >= p.consecutiveUpWeeks &&
     isBullish(a)
   );
 }
 
 /**
- * Score = equal-weight average of THE THREE factors (all in % units):
+ * Score = weighted blend of THE THREE factors (all in % units):
  *   (1) 4-day growth + (2) 4-week growth + (3) analyst price-target upside.
+ * Weights default to 1/3 each (a simple average).
  */
-export function scoreFactors(s: TickerSeries, i: number, a: AnalystInfo | undefined) {
+export function scoreFactors(s: TickerSeries, i: number, a: AnalystInfo | undefined, p: StrategyParams) {
   const g4d = s.growth4d[i] ?? 0;
   const g4w = s.growth4w[i] ?? 0;
   const analyst = a?.targetUpside ?? 0;
-  return { g4d, g4w, analyst, score: (g4d + g4w + analyst) / 3 };
+  const w = p.weights;
+  return { g4d, g4w, analyst, score: w.g4d * g4d + w.g4w * g4w + w.analyst * analyst };
 }
 
-/** Exit signal: two consecutive down days OR a rapid single-day drop. */
-export function exitSignal(s: TickerSeries, i: number): string | null {
+/** Exit signal: N consecutive down days OR a rapid single-day drop. */
+export function exitSignal(s: TickerSeries, i: number, p: StrategyParams): string | null {
   const dr = s.dayReturn[i];
-  if (dr !== null && dr <= -PARAMS.rapidDropPct) return `Rapid drop ${(dr * 100).toFixed(1)}%`;
-  if (s.downDays[i] >= PARAMS.consecutiveDownDays) return `${s.downDays[i]} down days`;
+  if (dr !== null && dr <= -p.rapidDropPct) return `Rapid drop ${(dr * 100).toFixed(1)}%`;
+  if (s.downDays[i] >= p.consecutiveDownDays) return `${s.downDays[i]} down days`;
   return null;
 }
 
@@ -281,9 +329,10 @@ interface OpenPos {
 export function backtest(
   seriesMap: Record<string, TickerSeries>,
   analystMap: Record<string, AnalystInfo>,
-  monthsBack = 6
+  monthsBack = 6,
+  p: StrategyParams = DEFAULT_PARAMS
 ): BacktestResult {
-  const allSeries = Object.values(seriesMap).filter((s) => s.bars.length > PARAMS.minHistory);
+  const allSeries = Object.values(seriesMap).filter((s) => s.bars.length > MIN_HISTORY);
   const bullishCount = allSeries.filter((s) => isBullish(analystMap[s.ticker])).length;
 
   const dateSet = new Set<string>();
@@ -302,17 +351,17 @@ export function backtest(
   const startStr = startD.toISOString().slice(0, 10);
   const windowDates = allDates.filter((d) => d >= startStr && d <= latest);
 
-  const slotSize = PARAMS.budget / PARAMS.maxPositions;
-  let cash = PARAMS.budget;
+  const slotSize = p.budget / p.maxPositions;
+  let cash = p.budget;
   const open = new Map<string, OpenPos>();
   const trades: Trade[] = [];
   const equityCurve: EquityPoint[] = [];
   const days: DailyRecord[] = [];
 
   let benchInit: { ticker: string; shares: number }[] | null = null;
-  let peakEquity = PARAMS.budget;
+  let peakEquity = p.budget;
   let maxDrawdown = 0;
-  let prevEquity = PARAMS.budget;
+  let prevEquity = p.budget;
   const involved = new Set<string>();
 
   function priceOn(s: TickerSeries, date: string): number | null {
@@ -330,7 +379,7 @@ export function backtest(
       const s = seriesMap[ticker];
       const i = s.dateToIdx.get(date);
       if (i === undefined) continue;
-      const reason = exitSignal(s, i);
+      const reason = exitSignal(s, i, p);
       if (reason) {
         const px = s.bars[i].close;
         cash += pos.shares * px;
@@ -349,8 +398,8 @@ export function backtest(
       .map((s) => {
         const i = s.dateToIdx.get(date);
         if (i === undefined) return null;
-        if (!buySignal(s, i, analystMap[s.ticker])) return null;
-        const f = scoreFactors(s, i, analystMap[s.ticker]);
+        if (!buySignal(s, i, analystMap[s.ticker], p)) return null;
+        const f = scoreFactors(s, i, analystMap[s.ticker], p);
         return { s, i, ...f, price: s.bars[i].close };
       })
       .filter((c): c is NonNullable<typeof c> => c !== null)
@@ -363,7 +412,7 @@ export function backtest(
       let allocated = 0;
       if (open.has(ticker)) {
         status = "HELD";
-      } else if (!soldToday.has(ticker) && open.size < PARAMS.maxPositions && cash >= slotSize && c.price > 0) {
+      } else if (!soldToday.has(ticker) && open.size < p.maxPositions && cash >= slotSize && c.price > 0) {
         const shares = slotSize / c.price;
         cash -= slotSize;
         open.set(ticker, { ticker, shares, entryPrice: c.price, entryDate: date, scoreAtEntry: c.score });
@@ -417,7 +466,7 @@ export function backtest(
 
     if (benchInit === null) {
       benchInit = [];
-      const per = PARAMS.budget / Math.max(1, allSeries.length);
+      const per = p.budget / Math.max(1, allSeries.length);
       for (const s of allSeries) {
         const px = priceOn(s, date);
         if (px && px > 0) benchInit.push({ ticker: s.ticker, shares: per / px });
@@ -446,8 +495,8 @@ export function backtest(
       const upWeeks = s.weekUpStreak[i];
       const a = analystMap[s.ticker];
       const bull = isBullish(a);
-      const hitDays = upDays >= PARAMS.consecutiveUpDays;
-      const hitWeeks = hitDays && upWeeks >= PARAMS.consecutiveUpWeeks;
+      const hitDays = upDays >= p.consecutiveUpDays;
+      const hitWeeks = hitDays && upWeeks >= p.consecutiveUpWeeks;
       const eligible = hitWeeks && bull;
       if (hitDays) funnel.up4days++;
       if (hitWeeks) funnel.up4daysWeeks++;
@@ -461,8 +510,8 @@ export function backtest(
       else if (eligible) status = "SKIPPED";
 
       let fail = "";
-      if (!hitDays) fail = `only ${upDays}/${PARAMS.consecutiveUpDays} up days`;
-      else if (!hitWeeks) fail = `only ${upWeeks}/${PARAMS.consecutiveUpWeeks} up weeks`;
+      if (!hitDays) fail = `only ${upDays}/${p.consecutiveUpDays} up days`;
+      else if (!hitWeeks) fail = `only ${upWeeks}/${p.consecutiveUpWeeks} up weeks`;
       else if (!bull) fail = `analyst: ${a?.recommendationKey ?? "no rating"}`;
 
       // last 4 daily moves (oldest -> newest)
@@ -481,7 +530,7 @@ export function backtest(
       }
 
       // Score is only meaningful when the entry criteria are met; otherwise 0.
-      const f = scoreFactors(s, i, a);
+      const f = scoreFactors(s, i, a, p);
       scan.push({
         ticker: s.ticker,
         rank: 0,
@@ -521,7 +570,7 @@ export function backtest(
       invested,
       equity,
       dayPnl: equity - prevEquity,
-      cumReturnPct: equity / PARAMS.budget - 1,
+      cumReturnPct: equity / p.budget - 1,
     });
     prevEquity = equity;
   }
@@ -554,20 +603,20 @@ export function backtest(
 
   const lastDate = windowDates[windowDates.length - 1];
   const openPositionsAtEnd = days.length > 0 ? days[days.length - 1].holdings : [];
-  const endEquity = equityCurve.length ? equityCurve[equityCurve.length - 1].equity : PARAMS.budget;
+  const endEquity = equityCurve.length ? equityCurve[equityCurve.length - 1].equity : p.budget;
   const closed = trades.filter((t) => t.returnPct !== null);
   const wins = closed.filter((t) => (t.returnPct as number) > 0).length;
   const avgRet = closed.length ? closed.reduce((a, t) => a + (t.returnPct as number), 0) / closed.length : 0;
   const sorted = [...closed].sort((a, b) => (b.returnPct as number) - (a.returnPct as number));
-  const benchStart = equityCurve.length ? equityCurve[0].benchmark : PARAMS.budget;
-  const benchEnd = equityCurve.length ? equityCurve[equityCurve.length - 1].benchmark : PARAMS.budget;
+  const benchStart = equityCurve.length ? equityCurve[0].benchmark : p.budget;
+  const benchEnd = equityCurve.length ? equityCurve[equityCurve.length - 1].benchmark : p.budget;
 
   return {
     startDate: windowDates[0] ?? startStr,
     endDate: lastDate ?? latest,
-    startEquity: PARAMS.budget,
+    startEquity: p.budget,
     endEquity,
-    totalReturnPct: endEquity / PARAMS.budget - 1,
+    totalReturnPct: endEquity / p.budget - 1,
     benchmarkReturnPct: benchStart ? benchEnd / benchStart - 1 : 0,
     maxDrawdownPct: maxDrawdown,
     numTrades: closed.length,

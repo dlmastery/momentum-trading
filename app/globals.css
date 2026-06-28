@@ -876,3 +876,27 @@ tr.clickable:hover td {
 .chart-legend .ll.amber {
   background: var(--amber);
 }
+
+/* ---- strategy parameter controls ---- */
+.params {
+  margin-top: 16px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.params > summary {
+  cursor: pointer;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.param-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+  margin: 14px 0 8px;
+}
+@media (max-width: 760px) {
+  .param-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

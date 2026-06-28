@@ -1,18 +1,11 @@
 import { promises as fs } from "fs";
 import path from "path";
+import { AnalystInfo, isBullish } from "./types";
+export type { AnalystInfo };
+export { isBullish };
 
 if (process.env.ALLOW_INSECURE_TLS === "1") {
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-}
-
-export interface AnalystInfo {
-  ticker: string;
-  recommendationMean: number | null; // 1 = Strong Buy ... 5 = Sell
-  recommendationKey: string | null; // strong_buy | buy | hold | underperform | sell
-  targetMeanPrice: number | null;
-  currentPrice: number | null;
-  targetUpside: number | null; // targetMeanPrice / currentPrice - 1
-  numAnalysts: number | null;
 }
 
 const CACHE_DIR = path.join(process.cwd(), ".cache", "analyst");
@@ -145,15 +138,4 @@ export async function getManyAnalyst(
     Array.from({ length: Math.min(concurrency, tickers.length) }, worker)
   );
   return out;
-}
-
-/** Bullish gate: analysts rate it Buy or Strong Buy (mean <= 2.5 as fallback). */
-export function isBullish(a: AnalystInfo | undefined): boolean {
-  if (!a) return false;
-  if (a.recommendationKey) {
-    const k = a.recommendationKey.toLowerCase();
-    if (k === "strong_buy" || k === "buy") return true;
-    if (k === "hold" || k === "underperform" || k === "sell" || k === "strong_sell") return false;
-  }
-  return a.recommendationMean !== null && a.recommendationMean <= 2.5;
 }

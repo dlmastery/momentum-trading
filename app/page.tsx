@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { loadEtfList, loadEtfData, runBacktestClient, CompactData } from "@/lib/loadData";
 
 // ---- types (mirror lib/strategy.ts) ----------------------------------------
-interface Etf { id: string; name: string; description: string; count: number }
+interface Etf { id: string; name: string; description: string; count: number; withData: number }
+interface Params { consecutiveUpDays: number; consecutiveUpWeeks: number; consecutiveDownDays: number; rapidDropPct: number; maxPositions: number; budget: number; weights: { g4d: number; g4w: number; analyst: number } }
 interface Trade { ticker: string; entryDate: string; entryPrice: number; exitDate: string | null; exitPrice: number | null; returnPct: number | null; pnl: number | null; exitReason: string | null; scoreAtEntry: number }
 interface EquityPoint { date: string; equity: number; benchmark: number }
 interface RankedRow { ticker: string; rank: number; score: number; g4d: number; g4w: number; analyst: number; recKey: string | null; dayReturnPct: number | null; upDays: number; upWeeks: number; allocated: number; status: "BUY" | "HELD" | "SKIPPED" }
@@ -18,7 +20,7 @@ interface Result {
   trades: Trade[]; equityCurve: EquityPoint[]; openPositionsAtEnd: HoldingRow[]; bullishCount: number;
   dates: string[]; tickers: string[]; returnsMatrix: (number | null)[][]; statusMatrix: number[][]; days: DailyRecord[];
 }
-interface ApiResponse { etf: { name: string }; params: Record<string, number>; tickersWithData: number; requestedTickers: number; analystCovered: number; result: Result }
+interface ApiResponse { etf: { name: string }; params: Params; tickersWithData: number; requestedTickers: number; analystCovered: number; result: Result }
 
 // ---- helpers ---------------------------------------------------------------
 const pct = (x: number | null | undefined) => (x === null || x === undefined ? "—" : `${(x * 100).toFixed(2)}%`);
@@ -356,16 +358,24 @@ function TickerChart({ data, trades, winStart, winEnd }: { data: TickerData; tra
   );
 }
 
-function TickerModal({ ticker, years, trades, winStart, winEnd, onClose }: { ticker: string; years: number; trades: Trade[]; winStart: string; winEnd: string; onClose: () => void }) {
-  const [data, setData] = useState<TickerData | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  useEffect(() => {
-    setData(null); setErr(null);
-    fetch(`/api/ticker?ticker=${encodeURIComponent(ticker)}&years=${years}`)
-      .then((r) => r.json())
-      .then((j) => { if (j.error) setErr(j.error); else setData(j); })
-      .catch((e) => setErr(String(e)));
-  }, [ticker, years]);
+function TickerModal({ ticker, etfData, trades, winStart, winEnd, onClose }: { ticker: string; etfData: CompactData; trades: Trade[]; winStart: string; winEnd: string; onClose: () => void }) {
+  const data: TickerData | null = useMemo(() => {
+    const t = etfData.tickers[ticker];
+    if (!t) return null;
+    return {
+      ticker,
+      analyst: {
+        recommendationKey: t.a?.recommendationKey ?? null,
+        recommendationMean: t.a?.recommendationMean ?? null,
+        targetMeanPrice: t.a?.targetMeanPrice ?? null,
+        currentPrice: t.a?.currentPrice ?? null,
+        targetUpside: t.a?.targetUpside ?? null,
+        numAnalysts: t.a?.numAnalysts ?? null,
+      },
+      bars: t.d.map((d, i) => ({ date: d, close: t.c[i], volume: t.v[i] ?? 0 })),
+    };
+  }, [etfData, ticker]);
+  const err = data ? null : `No data for ${ticker}`;
 
   const tt = trades.filter((t) => t.ticker === ticker);
   const a = data?.analyst;
@@ -561,26 +571,32 @@ function Methodology() {
 export default function Home() {
   const [etfs, setEtfs] = useState<Etf[]>([]);
   const [etfId, setEtfId] = useState("nasdaq100");
-  const [years, setYears] = useState(2);
   const [monthsBack, setMonthsBack] = useState(6);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<ApiResponse | null>(null);
+  const [etfData, setEtfData] = useState<CompactData | null>(null);
   const [selDay, setSelDay] = useState(0);
   const [selTicker, setSelTicker] = useState<string | null>(null);
+  const [params, setParams] = useState<Params>({
+    consecutiveUpDays: 4, consecutiveUpWeeks: 4, consecutiveDownDays: 2,
+    rapidDropPct: 0.2, maxPositions: 20, budget: 10000,
+    weights: { g4d: 1 / 3, g4w: 1 / 3, analyst: 1 / 3 },
+  });
 
-  useEffect(() => { fetch("/api/etfs").then((r) => r.json()).then(setEtfs).catch(() => {}); }, []);
+  useEffect(() => { loadEtfList().then(setEtfs).catch(() => {}); }, []);
 
   async function run() {
     setLoading(true); setError(null); setData(null);
     try {
-      const res = await fetch("/api/backtest", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ etfId, years, monthsBack }) });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+      const cd = await loadEtfData(etfId);
+      // run the backtest in the browser — no server
+      const json = runBacktestClient(cd, monthsBack, params as unknown as Record<string, unknown>) as unknown as ApiResponse;
+      setEtfData(cd);
       setData(json);
       setSelDay((json.result.dates?.length ?? 1) - 1);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Request failed");
+      setError(e instanceof Error ? e.message : "Failed to run backtest");
     } finally { setLoading(false); }
   }
 
@@ -602,20 +618,34 @@ export default function Home() {
           <div><label>ETF / Index</label>
             <select value={etfId} onChange={(e) => setEtfId(e.target.value)}>{etfs.map((e) => <option key={e.id} value={e.id}>{e.name} ({e.count} stocks)</option>)}</select>
           </div>
-          <div><label>History (years)</label><input type="number" min={1} max={10} value={years} onChange={(e) => setYears(Number(e.target.value))} /></div>
-          <div><label>Backtest window (months)</label><input type="number" min={1} max={24} value={monthsBack} onChange={(e) => setMonthsBack(Number(e.target.value))} /></div>
+          <div><label>Backtest window (months)</label><input type="number" min={1} max={18} value={monthsBack} onChange={(e) => setMonthsBack(Number(e.target.value))} /></div>
           <button className="run" onClick={run} disabled={loading}>{loading && <span className="spinner" />}{loading ? "Running…" : "Run backtest"}</button>
         </div>
+
+        <details className="params">
+          <summary>⚙️ Strategy parameters — change these and re-run to test &ldquo;why 2, why not 3?&rdquo;</summary>
+          <div className="param-grid">
+            <div><label>Up days to enter</label><input type="number" min={1} max={10} value={params.consecutiveUpDays} onChange={(e) => setParams({ ...params, consecutiveUpDays: Number(e.target.value) })} /></div>
+            <div><label>Up weeks to enter</label><input type="number" min={1} max={10} value={params.consecutiveUpWeeks} onChange={(e) => setParams({ ...params, consecutiveUpWeeks: Number(e.target.value) })} /></div>
+            <div><label>Down days to exit</label><input type="number" min={1} max={10} value={params.consecutiveDownDays} onChange={(e) => setParams({ ...params, consecutiveDownDays: Number(e.target.value) })} /></div>
+            <div><label>Rapid-drop exit (%)</label><input type="number" min={1} max={100} value={Math.round(params.rapidDropPct * 100)} onChange={(e) => setParams({ ...params, rapidDropPct: Number(e.target.value) / 100 })} /></div>
+            <div><label>Max positions</label><input type="number" min={1} max={100} value={params.maxPositions} onChange={(e) => setParams({ ...params, maxPositions: Number(e.target.value) })} /></div>
+            <div><label>Budget ($)</label><input type="number" min={100} step={1000} value={params.budget} onChange={(e) => setParams({ ...params, budget: Number(e.target.value) })} /></div>
+            <div><label>Weight · 4-day</label><input type="number" min={0} step={0.1} value={params.weights.g4d} onChange={(e) => setParams({ ...params, weights: { ...params.weights, g4d: Number(e.target.value) } })} /></div>
+            <div><label>Weight · 4-week</label><input type="number" min={0} step={0.1} value={params.weights.g4w} onChange={(e) => setParams({ ...params, weights: { ...params.weights, g4w: Number(e.target.value) } })} /></div>
+            <div><label>Weight · analyst</label><input type="number" min={0} step={0.1} value={params.weights.analyst} onChange={(e) => setParams({ ...params, weights: { ...params.weights, analyst: Number(e.target.value) } })} /></div>
+          </div>
+          <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>Weights are auto-normalized to sum to 1. Defaults: 4 / 4 / 2 / 20% / 20 / $10,000 / equal weights.</p>
+        </details>
       </div>
 
       <div className="note">
-        <b>Data &amp; methodology:</b> split/dividend-adjusted daily prices and <b>real analyst ratings &amp; mean price targets</b> from Yahoo Finance, cached on disk.
-        One honest limitation: analyst ratings are <i>current</i> (Yahoo doesn&rsquo;t expose historical targets for free), so the same rating is applied
-        across the backtest window — a mild look-ahead on factor&nbsp;3. Research/education only — not investment advice.
+        <b>100% client-side:</b> all prices &amp; <b>real Yahoo analyst ratings/targets</b> are pre-bundled as static JSON; the entire backtest runs in your browser — no server. So you can change parameters above and re-run instantly.
+        One honest limitation: analyst ratings are <i>current</i> (no free historical targets), so the same rating is applied across the window — a mild look-ahead on factor&nbsp;3. Research/education only — not investment advice.
       </div>
 
       {error && <div className="error">⚠ {error}</div>}
-      {loading && !data && <div className="panel">Fetching constituents &amp; running the simulation… first run may take ~30–60s while the price cache fills.</div>}
+      {loading && !data && <div className="panel">Loading data &amp; running the simulation in your browser…</div>}
 
       {r && data && (
         <>
@@ -701,10 +731,10 @@ export default function Home() {
         </>
       )}
 
-      {selTicker && r && (
+      {selTicker && r && etfData && (
         <TickerModal
           ticker={selTicker}
-          years={years}
+          etfData={etfData}
           trades={r.trades}
           winStart={r.startDate}
           winEnd={r.endDate}

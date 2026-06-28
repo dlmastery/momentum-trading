@@ -1,8 +1,9 @@
-// Bundled ETF / index constituent lists.
+// Bundled ETF / index constituent lists (single source of truth in etfs.json).
 //
 // Real-time constituents change over time and normally require a paid data
 // provider. These bundled lists are a representative, recent snapshot intended
-// for backtesting. Tickers use Stooq-compatible US symbols.
+// for backtesting.
+import etfsData from "./etfs.json";
 
 export interface EtfDef {
   id: string;
@@ -11,62 +12,7 @@ export interface EtfDef {
   tickers: string[];
 }
 
-const NASDAQ_100: string[] = [
-  "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "GOOG", "AVGO", "TSLA", "COST",
-  "NFLX", "ASML", "AMD", "PEP", "ADBE", "LIN", "CSCO", "TMUS", "QCOM", "INTU",
-  "TXN", "AMGN", "ISRG", "AMAT", "BKNG", "HON", "VRTX", "CMCSA", "ADP", "MU",
-  "PANW", "GILD", "ADI", "REGN", "LRCX", "MELI", "SBUX", "KLAC", "SNPS", "CDNS",
-  "INTC", "MDLZ", "PYPL", "MAR", "CRWD", "ABNB", "ORLY", "CTAS", "CSX", "PDD",
-  "WDAY", "FTNT", "DASH", "NXPI", "ADSK", "ROP", "CHTR", "PCAR", "MNST", "AEP",
-  "PAYX", "KDP", "CPRT", "ODFL", "ROST", "FANG", "BKR", "EA", "KHC", "FAST",
-  "VRSK", "CTSH", "EXC", "XEL", "GEHC", "CCEP", "DDOG", "TTD", "IDXX", "MCHP",
-  "AZN", "DXCM", "ON", "TEAM", "CSGP", "ANSS", "ZS", "GFS", "WBD", "BIIB",
-  "ILMN", "MRVL", "TTWO", "MDB", "LULU", "WBA", "ENPH",
-];
-
-const DOW_30: string[] = [
-  "AAPL", "AMGN", "AXP", "BA", "CAT", "CRM", "CSCO", "CVX", "DIS", "DOW",
-  "GS", "HD", "HON", "IBM", "INTC", "JNJ", "JPM", "KO", "MCD", "MMM",
-  "MRK", "MSFT", "NKE", "PG", "TRV", "UNH", "V", "VZ", "WMT", "AMZN",
-];
-
-// A broad, liquid subset of the S&P 500 across sectors (top ~120 by weight /
-// representativeness). Kept as a subset to keep backtests fast; expand freely.
-const SP_500: string[] = [
-  "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "GOOG", "BRK-B", "AVGO", "TSLA",
-  "JPM", "LLY", "V", "UNH", "XOM", "MA", "COST", "HD", "PG", "JNJ",
-  "NFLX", "ABBV", "BAC", "CRM", "ORCL", "CVX", "WMT", "KO", "MRK", "AMD",
-  "PEP", "ACN", "LIN", "ADBE", "MCD", "CSCO", "TMO", "ABT", "WFC", "DHR",
-  "GE", "PM", "TXN", "QCOM", "VZ", "INTU", "AMGN", "DIS", "CAT", "IBM",
-  "NOW", "SPGI", "ISRG", "AXP", "PFE", "GS", "NEE", "UBER", "RTX", "AMAT",
-  "T", "HON", "UNP", "LOW", "BKNG", "PGR", "ELV", "SYK", "BLK", "C",
-  "TJX", "VRTX", "MS", "BSX", "MDT", "ADP", "LMT", "CB", "MMC", "PLD",
-  "GILD", "DE", "ADI", "SBUX", "MU", "REGN", "BMY", "SCHW", "CI", "ETN",
-  "MO", "SO", "DUK", "ZTS", "BDX", "PANW", "KLAC", "AON", "ICE", "WM",
-  "APH", "CL", "CME", "EOG", "ITW", "MCK", "SHW", "CMG", "TT", "USB",
-  "GD", "NOC", "FCX", "PYPL", "EMR", "MAR", "PNC", "CSX", "ORLY", "MMM",
-];
-
-export const ETFS: EtfDef[] = [
-  {
-    id: "nasdaq100",
-    name: "Nasdaq-100",
-    description: "100 largest non-financial companies on Nasdaq (proxy: QQQ).",
-    tickers: NASDAQ_100,
-  },
-  {
-    id: "sp500",
-    name: "S&P 500 (liquid subset)",
-    description: "Broad cross-sector subset of the S&P 500 (proxy: SPY/VOO).",
-    tickers: SP_500,
-  },
-  {
-    id: "dow30",
-    name: "Dow Jones 30",
-    description: "30 large-cap blue-chip US stocks (proxy: DIA).",
-    tickers: DOW_30,
-  },
-];
+export const ETFS: EtfDef[] = etfsData as EtfDef[];
 
 export function getEtf(id: string): EtfDef | undefined {
   return ETFS.find((e) => e.id === id);

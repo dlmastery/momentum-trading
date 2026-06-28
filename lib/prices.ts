@@ -7,14 +7,8 @@ if (process.env.ALLOW_INSECURE_TLS === "1") {
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 }
 
-export interface Bar {
-  date: string; // YYYY-MM-DD
-  open: number;
-  high: number;
-  low: number;
-  close: number; // split/dividend adjusted
-  volume: number;
-}
+import { Bar } from "./types";
+export type { Bar };
 
 const CACHE_DIR = path.join(process.cwd(), ".cache", "prices");
 // Re-use cached data for this long before re-fetching (end-of-day data).
