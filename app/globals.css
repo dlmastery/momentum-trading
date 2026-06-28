@@ -730,3 +730,82 @@ table.scan td {
   padding: 6px 8px;
   white-space: nowrap;
 }
+
+/* ---- methodology document ---- */
+.doc {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 4px 20px;
+  margin-bottom: 20px;
+}
+.doc > summary {
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 700;
+  padding: 14px 0;
+  list-style: none;
+}
+.doc > summary::-webkit-details-marker {
+  display: none;
+}
+.doc > summary::before {
+  content: "▸ ";
+  color: var(--accent);
+}
+.doc[open] > summary::before {
+  content: "▾ ";
+}
+.doc-body {
+  padding: 4px 0 18px;
+  max-width: 880px;
+}
+.doc-lead {
+  font-size: 14.5px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.doc-body h4 {
+  font-size: 14px;
+  margin: 20px 0 6px;
+  color: var(--accent);
+}
+.doc-body h4.warn {
+  color: var(--amber);
+}
+.doc-body ul {
+  margin: 6px 0;
+  padding-left: 20px;
+  font-size: 13.5px;
+}
+.doc-body li {
+  margin-bottom: 6px;
+}
+.doc-body p {
+  font-size: 13.5px;
+  margin: 6px 0;
+}
+.doc-body pre {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  overflow-x: auto;
+  color: var(--green);
+}
+.doc-body code {
+  background: var(--panel-2);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.doc-foot {
+  margin-top: 16px !important;
+  padding: 12px 14px;
+  background: rgba(245, 166, 35, 0.08);
+  border: 1px solid rgba(245, 166, 35, 0.3);
+  border-radius: 10px;
+}

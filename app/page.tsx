@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 // ---- types (mirror lib/strategy.ts) ----------------------------------------
 interface Etf { id: string; name: string; description: string; count: number }
-interface Trade { ticker: string; entryDate: string; entryPrice: number; exitDate: string | null; exitPrice: number | null; returnPct: number | null; pnl: number | null; exitReason: string | null }
+interface Trade { ticker: string; entryDate: string; entryPrice: number; exitDate: string | null; exitPrice: number | null; returnPct: number | null; pnl: number | null; exitReason: string | null; scoreAtEntry: number }
 interface EquityPoint { date: string; equity: number; benchmark: number }
 interface RankedRow { ticker: string; rank: number; score: number; g4d: number; g4w: number; analyst: number; recKey: string | null; dayReturnPct: number | null; upDays: number; upWeeks: number; allocated: number; status: "BUY" | "HELD" | "SKIPPED" }
 interface DayAction { ticker: string; type: "BUY" | "SELL" | "HOLD"; shares: number; price: number; allocated: number; pnl: number | null; returnPct: number | null; reason: string | null }
@@ -295,6 +295,144 @@ function UniverseScan({ scan }: { scan: ScanRow[] }) {
   );
 }
 
+function TradeLog({ trades, dates }: { trades: Trade[]; dates: string[] }) {
+  const idx = useMemo(() => new Map(dates.map((d, i) => [d, i])), [dates]);
+  const lastIdx = dates.length - 1;
+  const daysHeld = (t: Trade) => {
+    const e = idx.get(t.entryDate);
+    if (e === undefined) return null;
+    const x = t.exitDate ? idx.get(t.exitDate) ?? lastIdx : lastIdx;
+    return x - e;
+  };
+  const closed = trades.filter((t) => t.exitDate);
+  const open = trades.filter((t) => !t.exitDate);
+  const held = trades.map(daysHeld).filter((d): d is number => d !== null);
+  const avgHeld = held.length ? held.reduce((a, b) => a + b, 0) / held.length : 0;
+  const maxHeld = held.length ? Math.max(...held) : 0;
+  const wins = closed.filter((t) => (t.returnPct ?? 0) > 0).length;
+
+  return (
+    <div className="panel">
+      <div className="section-title">Every trade taken ({trades.length}) — entry trigger, holding period &amp; exit reason</div>
+      <div className="day-totals" style={{ gridTemplateColumns: "repeat(5,1fr)" }}>
+        <div className="dt"><span>Closed</span><b>{closed.length}</b></div>
+        <div className="dt"><span>Still open</span><b>{open.length}</b></div>
+        <div className="dt"><span>Win rate (closed)</span><b>{closed.length ? ((wins / closed.length) * 100).toFixed(0) : 0}%</b></div>
+        <div className="dt"><span>Avg days held</span><b>{avgHeld.toFixed(1)}</b></div>
+        <div className="dt"><span>Longest hold</span><b>{maxHeld} d</b></div>
+      </div>
+      <div className="tablewrap">
+        <table>
+          <thead><tr>
+            <th>Ticker</th>
+            <th title="Why we entered: passed the GREEN gate (4 up-days + 4 up-weeks + analyst Buy), ranked by score">Entry reason</th>
+            <th>Entry date</th><th>Entry $</th>
+            <th title="Trading days the position was held">Days held</th>
+            <th>Exit date</th><th>Exit $</th>
+            <th>Return</th><th>P&amp;L</th>
+            <th title="Why we exited: 2 down days or a rapid drop">Exit reason</th>
+          </tr></thead>
+          <tbody>
+            {trades.map((t, i) => (
+              <tr key={i}>
+                <td><b>{t.ticker}</b></td>
+                <td className="left" style={{ fontSize: 12 }}>
+                  <span className="tag held">GREEN</span> <span className="muted">score {sp(t.scoreAtEntry)}</span>
+                </td>
+                <td>{t.entryDate}</td>
+                <td>{money(t.entryPrice)}</td>
+                <td>{daysHeld(t) ?? "—"}{!t.exitDate ? <span className="muted"> (open)</span> : ""}</td>
+                <td>{t.exitDate ?? <span className="badge">open</span>}</td>
+                <td>{t.exitPrice !== null ? money(t.exitPrice) : "—"}</td>
+                <td className={cls(t.returnPct)}>{pct(t.returnPct)}</td>
+                <td className={cls(t.pnl)}>{t.pnl !== null ? money(t.pnl) : "—"}</td>
+                <td className="muted left">{t.exitReason ?? (t.exitDate ? "—" : "still held (trend intact)")}</td>
+              </tr>
+            ))}
+            {trades.length === 0 && <tr><td colSpan={10} className="muted center">No trades triggered in this window.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function Methodology() {
+  return (
+    <details className="doc" open>
+      <summary>📘 Methodology — the strategy in Wall&nbsp;Street terms (read me first)</summary>
+      <div className="doc-body">
+        <p className="doc-lead">
+          In professional language this is a <b>long-only, cross-sectional price-momentum strategy with a trend-following
+          entry trigger, a sell-side analyst (fundamental) overlay, equal-weight position sizing, and a rules-based stop</b>.
+          Plainly: buy stocks that are trending up on more than one timeframe <i>and</i> that Wall&nbsp;Street analysts rate a
+          Buy, hold the strongest of them, and cut a name the moment its trend breaks.
+        </p>
+
+        <h4>1. The factor stack (what drives every decision)</h4>
+        <ul>
+          <li><b>Price momentum / trend confirmation</b> — the stock must be rising on two horizons at once: <b>4 consecutive
+            higher daily closes</b> and <b>4 consecutive higher weekly closes</b>. Requiring agreement across timeframes is a
+            classic trend-confirmation filter.</li>
+          <li><b>Fundamental / sentiment overlay</b> — the sell-side <b>analyst consensus must be Buy or Strong&nbsp;Buy</b>
+            (Yahoo <code>recommendationKey</code>). This is the &ldquo;quality / fundamentals&rdquo; gate that keeps the
+            strategy out of purely technical pops in names the Street dislikes.</li>
+          <li><b>Return-potential score</b> — among names that clear the gate, rank by expected upside.</li>
+        </ul>
+
+        <h4>2. Entry — the &ldquo;GREEN&rdquo; signal</h4>
+        <p>A stock is eligible to buy only when <b>all three</b> are true on the same end-of-day:
+          4 up days <b>AND</b> 4 up weeks <b>AND</b> analyst Buy/Strong&nbsp;Buy. Miss any one and it is not a candidate.</p>
+
+        <h4>3. Scoring &amp; selection (&ldquo;return potential&rdquo;)</h4>
+        <p>Each eligible stock is scored as the <b>equal-weight average of three percentages</b>:</p>
+        <pre>score = ( 4-day price growth  +  4-week price growth  +  analyst mean price-target upside ) / 3</pre>
+        <p>All three are in the same unit (%), so a simple average is unbiased. <b>A stock that fails the entry gate scores
+          0</b> — it is shown for transparency but cannot be selected. Eligible names are sorted highest-score-first and the
+          top ranks fill the open slots.</p>
+
+        <h4>4. Position sizing &amp; budget</h4>
+        <p><b>$10,000</b> is split into <b>20 equal slots of $500</b> (equal-dollar weighting). The strategy holds at most
+          20 names; it buys the highest-scoring eligible stocks until slots or cash run out, so on quiet days it may sit
+          partly in cash.</p>
+
+        <h4>5. Exit — the &ldquo;RED&rdquo; signal (trend-following stop)</h4>
+        <p>A held position is sold at the close when <b>either</b>: <b>2 consecutive lower daily closes</b>, or a
+          <b> single-day drop of ≥ 20%</b>. A single down day does <i>not</i> sell. Freed capital is recycled into the next
+          best eligible names. Each position is re-evaluated <b>every end-of-day</b>.</p>
+
+        <h4>6. Benchmark</h4>
+        <p>The equity curve is compared to an <b>equal-weight buy-and-hold</b> of the same universe over the same window —
+          a simple &ldquo;did the timing add anything?&rdquo; yardstick.</p>
+
+        <h4>Where this sits in the literature</h4>
+        <ul>
+          <li><b>Momentum</b> is one of the most documented anomalies in finance (Jegadeesh &amp; Titman, 1993). <b>Trend
+            following / time-series momentum</b> underpins managed futures &amp; CTAs (Moskowitz, Ooi &amp; Pedersen, 2012; AQR).</li>
+          <li>Pairing momentum with <b>quality/fundamentals</b> echoes O&rsquo;Neil&rsquo;s <b>CAN&nbsp;SLIM</b> and AQR&rsquo;s
+            <b> Quality-Minus-Junk</b>; analyst <b>recommendation changes</b> carry information (Womack, 1996).</li>
+          <li><b>Cutting losers with a stop</b> is core trend-following risk management — O&rsquo;Neil&rsquo;s famous 7–8% stop.</li>
+        </ul>
+
+        <h4 className="warn">⚠️ What a skeptical analyst would flag (read before trusting any number)</h4>
+        <ul>
+          <li><b>Short-horizon trigger vs. short-term reversal:</b> 4-day / 4-week streaks live in the window where the
+            evidence shows <i>mean reversion</i>, not continuation (Jegadeesh 1990; Lehmann 1990). Canonical momentum uses a
+            <b> 6–12 month</b> formation window and skips the most recent month.</li>
+          <li><b>Analyst rating <i>levels</i> are weak/lagging</b> versus <i>revisions</i> (upgrades, rising targets).</li>
+          <li><b>Survivorship bias</b> — constituents are <i>current</i> index members; dropped names are absent.</li>
+          <li><b>Look-ahead on analyst data</b> — current ratings/targets are applied across the whole backtest.</li>
+          <li><b>Same-close execution</b> — signal and fill both at the day&rsquo;s close; a realistic test trades next open.</li>
+          <li><b>No costs</b> — no commissions, spread or slippage; fractional shares assumed. <b>Tiny sample</b> (6 months).</li>
+        </ul>
+        <p className="doc-foot"><b>Bottom line:</b> the framework is legitimate and institutionally used, but these specific
+          parameters are textbook-naïve and the backtest is optimistic. Treat this as an <b>educational tool, not a proven edge</b> —
+          not investment advice.</p>
+      </div>
+    </details>
+  );
+}
+
 export default function Home() {
   const [etfs, setEtfs] = useState<Etf[]>([]);
   const [etfId, setEtfId] = useState("nasdaq100");
@@ -327,11 +465,11 @@ export default function Home() {
     <div className="wrap">
       <h1 className="title">SimpleTrade</h1>
       <p className="subtitle">
-        Daily end-of-day momentum backtester. Entry requires <b>4 consecutive up days AND 4 consecutive up weeks AND analysts rating it Buy/Strong&nbsp;Buy</b>.
-        Eligible stocks are scored on exactly three factors — <b>4-day growth, 4-week growth, and analyst price-target upside</b> (equal-weight average) —
-        ranked, and the top ranks are bought with a $10,000 budget split into 20 equal $500 slots. Positions are re-evaluated daily and sold on two down
-        days or a rapid drop. Everything below is the actual audited ledger.
+        A daily end-of-day momentum + trend-following backtester with a sell-side analyst overlay. The methodology below explains
+        the technique in Wall&nbsp;Street terms; everything further down is the actual audited, day-by-day ledger.
       </p>
+
+      <Methodology />
 
       <div className="panel">
         <div className="controls">
@@ -433,24 +571,7 @@ export default function Home() {
             </div>
           )}
 
-          <div className="panel">
-            <div className="section-title">Full trade log ({r.trades.length})</div>
-            <div className="tablewrap">
-              <table>
-                <thead><tr><th>Ticker</th><th>Entry date</th><th>Entry</th><th>Exit date</th><th>Exit</th><th>Return</th><th>P&amp;L</th><th>Exit reason</th></tr></thead>
-                <tbody>
-                  {r.trades.map((t, i) => (
-                    <tr key={i}>
-                      <td>{t.ticker}</td><td>{t.entryDate}</td><td>{money(t.entryPrice)}</td><td>{t.exitDate ?? <span className="badge">open</span>}</td>
-                      <td>{t.exitPrice !== null ? money(t.exitPrice) : "—"}</td><td className={cls(t.returnPct)}>{pct(t.returnPct)}</td>
-                      <td className={cls(t.pnl)}>{t.pnl !== null ? money(t.pnl) : "—"}</td><td className="muted left">{t.exitReason ?? "—"}</td>
-                    </tr>
-                  ))}
-                  {r.trades.length === 0 && <tr><td colSpan={8} className="muted center">No trades triggered in this window.</td></tr>}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <TradeLog trades={r.trades} dates={r.dates} />
         </>
       )}
     </div>
