@@ -133,7 +133,7 @@ function Heatmap({ r, selected, onSelect }: { r: Result; selected: number; onSel
 }
 
 // ---- detail for one trading day --------------------------------------------
-function DayDetail({ day }: { day: DailyRecord }) {
+function DayDetail({ day, onPick }: { day: DailyRecord; onPick: (t: string) => void }) {
   const buys = day.actions.filter((a) => a.type === "BUY");
   const sells = day.actions.filter((a) => a.type === "SELL");
   const holds = day.actions.filter((a) => a.type === "HOLD");
@@ -205,7 +205,7 @@ function DayDetail({ day }: { day: DailyRecord }) {
         <div className="fn act"><b>{day.funnel.sold}</b><span>sold</span></div>
       </div>
 
-      <UniverseScan scan={day.scan} />
+      <UniverseScan scan={day.scan} onPick={onPick} />
     </div>
   );
 }
@@ -221,7 +221,7 @@ function Squares({ seq }: { seq: (boolean | null)[] }) {
   );
 }
 
-function UniverseScan({ scan }: { scan: ScanRow[] }) {
+function UniverseScan({ scan, onPick }: { scan: ScanRow[]; onPick: (t: string) => void }) {
   const [filter, setFilter] = useState<"all" | "intrade" | "eligible" | "up">("all");
   const rows = scan.filter((s) =>
     filter === "all" ? true
@@ -269,9 +269,9 @@ function UniverseScan({ scan }: { scan: ScanRow[] }) {
           </tr></thead>
           <tbody>
             {rows.map((s) => (
-              <tr key={s.ticker} className={s.status === "BUY" ? "row-buy" : s.inTrade ? "row-held" : s.eligible ? "" : "row-dim"}>
+              <tr key={s.ticker} className={`clickable ${s.status === "BUY" ? "row-buy" : s.inTrade ? "row-held" : s.eligible ? "" : "row-dim"}`} onClick={() => onPick(s.ticker)} title={`Open ${s.ticker} chart`}>
                 <td>#{s.rank}</td>
-                <td><b>{s.ticker}</b></td>
+                <td><b>{s.ticker}</b> <span className="muted">↗</span></td>
                 <td>{s.inTrade ? <span className="tag held">IN</span> : <span className="muted">—</span>}</td>
                 <td>{money(s.close)}</td>
                 <td className={cls(s.dayReturnPct)}>{sp(s.dayReturnPct)}</td>
@@ -295,7 +295,132 @@ function UniverseScan({ scan }: { scan: ScanRow[] }) {
   );
 }
 
-function TradeLog({ trades, dates }: { trades: Trade[]; dates: string[] }) {
+interface TickerBar { date: string; close: number; volume: number }
+interface TickerAnalyst { recommendationKey: string | null; recommendationMean: number | null; targetMeanPrice: number | null; currentPrice: number | null; targetUpside: number | null; numAnalysts: number | null }
+interface TickerData { ticker: string; analyst: TickerAnalyst; bars: TickerBar[] }
+
+function TickerChart({ data, trades, winStart, winEnd }: { data: TickerData; trades: Trade[]; winStart: string; winEnd: string }) {
+  const W = 940, H = 320, VH = 70, P = 46, GAP = 16;
+  const bars = data.bars;
+  const idxOf = useMemo(() => new Map(bars.map((b, i) => [b.date, i])), [bars]);
+  const n = bars.length;
+  if (n < 2) return <div className="muted">Not enough data to chart.</div>;
+
+  const closes = bars.map((b) => b.close);
+  let lo = Math.min(...closes), hi = Math.max(...closes);
+  const pad = (hi - lo) * 0.06 || hi * 0.05; lo -= pad; hi += pad;
+  const maxVol = Math.max(...bars.map((b) => b.volume), 1);
+  const x = (i: number) => P + (i / (n - 1)) * (W - P - 12);
+  const y = (v: number) => 12 + ((hi - v) / (hi - lo || 1)) * (H - 12 - 24);
+  const vy = (v: number) => H + GAP + (VH - 14) * (1 - v / maxVol);
+
+  const pricePath = bars.map((b, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(b.close).toFixed(1)}`).join(" ");
+  const wS = idxOf.get(winStart) ?? bars.findIndex((b) => b.date >= winStart);
+  const wE = idxOf.get(winEnd) ?? n - 1;
+  const gridY = [0, 0.25, 0.5, 0.75, 1].map((f) => lo + f * (hi - lo));
+
+  const markers = trades.flatMap((t) => {
+    const out: { i: number; price: number; type: "BUY" | "SELL"; label: string }[] = [];
+    const ei = idxOf.get(t.entryDate);
+    if (ei !== undefined) out.push({ i: ei, price: t.entryPrice, type: "BUY", label: `BUY ${t.entryDate} @ ${money(t.entryPrice)}` });
+    if (t.exitDate) { const xi = idxOf.get(t.exitDate); if (xi !== undefined && t.exitPrice !== null) out.push({ i: xi, price: t.exitPrice, type: "SELL", label: `SELL ${t.exitDate} @ ${money(t.exitPrice)} (${t.exitReason})` }); }
+    return out;
+  });
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H + GAP + VH}`} width="100%" role="img" aria-label={`${data.ticker} price`}>
+      {/* backtest window shading */}
+      {wS >= 0 && <rect x={x(wS)} y={10} width={Math.max(1, x(wE) - x(wS))} height={H - 22} fill="rgba(79,157,255,0.08)" stroke="rgba(79,157,255,0.25)" />}
+      {gridY.map((gv, i) => (
+        <g key={i}>
+          <line x1={P} y1={y(gv)} x2={W - 12} y2={y(gv)} stroke="#263043" />
+          <text x={6} y={y(gv) + 4} fill="#8b97aa" fontSize={11}>{money0(gv)}</text>
+        </g>
+      ))}
+      <path d={pricePath} fill="none" stroke="#e6edf6" strokeWidth={1.6} />
+      {/* volume */}
+      {bars.map((b, i) => <line key={i} x1={x(i)} y1={H + GAP + VH - 14} x2={x(i)} y2={vy(b.volume)} stroke="#33405a" strokeWidth={Math.max(0.6, (W - P) / n - 0.4)} />)}
+      <text x={6} y={H + GAP + 10} fill="#8b97aa" fontSize={10}>vol</text>
+      {/* trade markers */}
+      {markers.map((m, k) => (
+        <g key={k}>
+          <line x1={x(m.i)} y1={12} x2={x(m.i)} y2={H - 12} stroke={m.type === "BUY" ? "rgba(46,204,113,0.4)" : "rgba(245,166,35,0.4)"} strokeDasharray="3 3" />
+          <circle cx={x(m.i)} cy={y(m.price)} r={4.5} fill={m.type === "BUY" ? "#2ecc71" : "#f5a623"} stroke="#0b0f17" strokeWidth={1}>
+            <title>{m.label}</title>
+          </circle>
+        </g>
+      ))}
+      {/* date axis */}
+      {[0, Math.floor(n / 2), n - 1].map((i) => <text key={i} x={x(i)} y={H - 2} fill="#8b97aa" fontSize={10} textAnchor="middle">{bars[i].date}</text>)}
+    </svg>
+  );
+}
+
+function TickerModal({ ticker, years, trades, winStart, winEnd, onClose }: { ticker: string; years: number; trades: Trade[]; winStart: string; winEnd: string; onClose: () => void }) {
+  const [data, setData] = useState<TickerData | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    setData(null); setErr(null);
+    fetch(`/api/ticker?ticker=${encodeURIComponent(ticker)}&years=${years}`)
+      .then((r) => r.json())
+      .then((j) => { if (j.error) setErr(j.error); else setData(j); })
+      .catch((e) => setErr(String(e)));
+  }, [ticker, years]);
+
+  const tt = trades.filter((t) => t.ticker === ticker);
+  const a = data?.analyst;
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <div className="section-title" style={{ margin: 0 }}>{ticker} — price &amp; this strategy&rsquo;s trades</div>
+          <button className="modal-x" onClick={onClose}>✕</button>
+        </div>
+        {!data && !err && <div className="muted">Loading {ticker}…</div>}
+        {err && <div className="error">⚠ {err}</div>}
+        {data && (
+          <>
+            {a && (
+              <div className="day-totals" style={{ gridTemplateColumns: "repeat(5,1fr)" }}>
+                <div className="dt"><span>Last close</span><b>{money(data.bars[data.bars.length - 1].close)}</b></div>
+                <div className="dt"><span>Analyst rating</span><b>{a.recommendationKey ? a.recommendationKey.replace("_", " ") : "—"}</b></div>
+                <div className="dt"><span>Mean target</span><b>{a.targetMeanPrice ? money(a.targetMeanPrice) : "—"}</b></div>
+                <div className="dt"><span>Target upside</span><b className={cls(a.targetUpside)}>{a.targetUpside !== null ? sp(a.targetUpside) : "—"}</b></div>
+                <div className="dt"><span># analysts</span><b>{a.numAnalysts ?? "—"}</b></div>
+              </div>
+            )}
+            <div className="chart-legend">
+              <span className="ll" style={{ background: "rgba(79,157,255,0.25)", border: "1px solid rgba(79,157,255,0.5)" }} /> backtest window
+              <span className="ll dot green" /> buy &nbsp; <span className="ll dot amber" /> sell &nbsp; (hover a dot for details)
+            </div>
+            <TickerChart data={data} trades={tt} winStart={winStart} winEnd={winEnd} />
+            <div className="section-title sm" style={{ marginTop: 14 }}>Trades on {ticker} in this backtest ({tt.length})</div>
+            <div className="tablewrap short">
+              <table>
+                <thead><tr><th>Entry date</th><th>Entry</th><th>Exit date</th><th>Exit</th><th>Return</th><th>P&amp;L</th><th>Exit reason</th></tr></thead>
+                <tbody>
+                  {tt.map((t, i) => (
+                    <tr key={i}>
+                      <td>{t.entryDate}</td><td>{money(t.entryPrice)}</td><td>{t.exitDate ?? <span className="badge">open</span>}</td>
+                      <td>{t.exitPrice !== null ? money(t.exitPrice) : "—"}</td>
+                      <td className={cls(t.returnPct)}>{pct(t.returnPct)}</td>
+                      <td className={cls(t.pnl)}>{t.pnl !== null ? money(t.pnl) : "—"}</td>
+                      <td className="muted left">{t.exitReason ?? "—"}</td>
+                    </tr>
+                  ))}
+                  {tt.length === 0 && <tr><td colSpan={7} className="muted center">The strategy never traded {ticker} in this window.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TradeLog({ trades, dates, onPick }: { trades: Trade[]; dates: string[]; onPick: (t: string) => void }) {
   const idx = useMemo(() => new Map(dates.map((d, i) => [d, i])), [dates]);
   const lastIdx = dates.length - 1;
   const daysHeld = (t: Trade) => {
@@ -334,8 +459,8 @@ function TradeLog({ trades, dates }: { trades: Trade[]; dates: string[] }) {
           </tr></thead>
           <tbody>
             {trades.map((t, i) => (
-              <tr key={i}>
-                <td><b>{t.ticker}</b></td>
+              <tr key={i} className="clickable" onClick={() => onPick(t.ticker)} title={`Open ${t.ticker} chart`}>
+                <td><b>{t.ticker}</b> <span className="muted">↗</span></td>
                 <td className="left" style={{ fontSize: 12 }}>
                   <span className="tag held">GREEN</span> <span className="muted">score {sp(t.scoreAtEntry)}</span>
                 </td>
@@ -442,6 +567,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<ApiResponse | null>(null);
   const [selDay, setSelDay] = useState(0);
+  const [selTicker, setSelTicker] = useState<string | null>(null);
 
   useEffect(() => { fetch("/api/etfs").then((r) => r.json()).then(setEtfs).catch(() => {}); }, []);
 
@@ -567,12 +693,23 @@ export default function Home() {
           {day && (
             <div className="panel">
               <div className="section-title">② Day {selDay + 1} of {r.dates.length} · <span className="pos">{day.date}</span> — everything the strategy saw &amp; did</div>
-              <DayDetail day={day} />
+              <DayDetail day={day} onPick={setSelTicker} />
             </div>
           )}
 
-          <TradeLog trades={r.trades} dates={r.dates} />
+          <TradeLog trades={r.trades} dates={r.dates} onPick={setSelTicker} />
         </>
+      )}
+
+      {selTicker && r && (
+        <TickerModal
+          ticker={selTicker}
+          years={years}
+          trades={r.trades}
+          winStart={r.startDate}
+          winEnd={r.endDate}
+          onClose={() => setSelTicker(null)}
+        />
       )}
     </div>
   );

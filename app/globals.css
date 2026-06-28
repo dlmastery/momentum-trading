@@ -809,3 +809,70 @@ table.scan td {
   border: 1px solid rgba(245, 166, 35, 0.3);
   border-radius: 10px;
 }
+
+/* ---- clickable rows + ticker modal ---- */
+tr.clickable {
+  cursor: pointer;
+}
+tr.clickable:hover td {
+  background: rgba(79, 157, 255, 0.10);
+}
+.modal-bg {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 14, 0.72);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 40px 20px;
+  overflow-y: auto;
+  z-index: 50;
+}
+.modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px 22px;
+  width: 100%;
+  max-width: 1000px;
+}
+.modal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.modal-x {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  width: 34px;
+  height: 34px;
+  cursor: pointer;
+  font-size: 15px;
+}
+.chart-legend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  margin: 6px 0 4px;
+}
+.chart-legend .ll {
+  display: inline-block;
+  width: 18px;
+  height: 11px;
+  border-radius: 2px;
+}
+.chart-legend .ll.dot {
+  width: 11px;
+  border-radius: 50%;
+}
+.chart-legend .ll.green {
+  background: var(--green);
+}
+.chart-legend .ll.amber {
+  background: var(--amber);
+}
